@@ -1,0 +1,16 @@
+product_id,product_name,category,price,units_sold,revenue,sales_date,region
+1,Laptop Pro,Electronics,1299,45,58455,2024-01-15,North
+2,Wireless Mouse,Electronics,29,120,3480,2024-01-15,South
+3,Office Chair,Furniture,249,32,7968,2024-01-16,East
+4,Smartphone X,Electronics,899,67,60233,2024-01-17,West
+5,Standing Desk,Furniture,599,18,10782,2024-01-18,North
+6,Tablet Air,Electronics,449,89,39961,2024-01-19,South
+7,Ergonomic Keyboard,Electronics,79,156,12324,2024-01-20,East
+8,Bookshelf,Furniture,189,41,7749,2024-01-21,West
+9,Monitor 4K,Electronics,329,73,24017,2024-01-22,North
+10,Coffee Table,Furniture,299,25,7475,2024-01-23,South
+11,Gaming Mouse,Electronics,59,94,5546,2024-01-24,East
+12,Desk Lamp,Furniture,89,67,5963,2024-01-25,West
+13,Headphones Pro,Electronics,199,112,22288,2024-01-26,North
+14,Filing Cabinet,Furniture,179,29,5191,2024-01-27,South
+15,Webcam HD,Electronics,99,145,14355,2024-01-28,East

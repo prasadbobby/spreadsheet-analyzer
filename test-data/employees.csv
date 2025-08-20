@@ -1,0 +1,17 @@
+employee_id,name,department,salary,age,hire_date,performance_rating
+1,John Smith,Engineering,95000,28,2020-03-15,4.2
+2,Sarah Johnson,Marketing,72000,32,2019-07-22,4.5
+3,Mike Chen,Engineering,105000,35,2018-01-10,4.8
+4,Emily Davis,HR,68000,29,2021-06-01,4.1
+5,David Wilson,Sales,78000,31,2020-11-30,4.3
+6,Lisa Brown,Engineering,110000,38,2017-09-05,4.7
+7,James Miller,Marketing,65000,26,2022-02-14,3.9
+8,Anna Garcia,Finance,82000,33,2019-12-08,4.4
+9,Robert Taylor,Sales,85000,30,2020-08-17,4.6
+10,Jennifer Lee,HR,71000,27,2021-04-12,4.2
+11,Mark Anderson,Engineering,98000,34,2018-11-20,4.5
+12,Jessica White,Finance,79000,29,2020-05-03,4.3
+13,Christopher Moore,Sales,92000,36,2019-03-25,4.7
+14,Ashley Thompson,Marketing,70000,28,2021-09-18,4.1
+15,Matthew Jackson,Engineering,115000,40,2016-12-01,4.9
+16,Matthew bob,Engineering,15000,45,2016-10-01,4.3
