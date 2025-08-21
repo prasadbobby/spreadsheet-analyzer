@@ -30,7 +30,6 @@ export const AISheetChatProvider = ({ children }) => {
   useEffect(() => {
     initializeApp()
     
-    // Cleanup on unmount
     return () => {
       if (statusIntervalRef.current) {
         clearInterval(statusIntervalRef.current)
@@ -40,25 +39,14 @@ export const AISheetChatProvider = ({ children }) => {
 
   const initializeApp = async () => {
     await loadChatHistory()
-    
-    // Check if there's an active dataset on app load
-    try {
-      const status = await apiService.getStatus()
-      if (status.stage === 'complete') {
-        setDatasetLoaded(true)
-        setDatasetInfo(status.dataset_info)
-        setInsights(status.insights || [])
-      }
-    } catch (error) {
-      console.log('No active dataset on startup')
-    }
   }
 
   const createNewChat = async () => {
     try {
-      // Clear current state for new chat
       setMessages([])
-      // Don't clear dataset state - keep it persistent
+      setDatasetLoaded(false)
+      setDatasetInfo(null)
+      setInsights([])
       setUploadError(null)
       setProgress(0)
       
@@ -66,29 +54,6 @@ export const AISheetChatProvider = ({ children }) => {
       if (result.success) {
         setCurrentChatId(result.chat_id)
         
-        // If we have a dataset loaded, add welcome message to new chat
-        if (datasetLoaded && datasetInfo) {
-          const welcomeMessage = {
-            id: `welcome-${Date.now()}`,
-            type: 'assistant',
-            content: `🧠 **AI Analysis Ready!**\n\n` +
-              `I've analyzed your dataset with **${datasetInfo.shape.rows.toLocaleString()} rows** and **${datasetInfo.shape.columns} columns**.\n\n` +
-              `📊 **File size:** ${datasetInfo.file_size_formatted || `${datasetInfo.file_size_mb} MB`}\n\n` +
-              `✨ **I can help you with:**\n` +
-              `• Natural language questions about your data\n` +
-              `• Pattern recognition and insights\n` +
-              `• Statistical analysis and summaries\n` +
-              `• Data filtering and visualization\n` +
-              `• Anomaly detection\n` +
-              `• Recommendations based on data\n\n` +
-              `Ask me anything! I understand natural language and provide complete results.`,
-            analysisType: 'ai_analysis',
-            timestamp: new Date().toISOString()
-          }
-          setMessages([welcomeMessage])
-        }
-        
-        // Reload chat history to get the updated list
         setTimeout(async () => {
           await loadChatHistory()
         }, 100)
@@ -106,17 +71,46 @@ export const AISheetChatProvider = ({ children }) => {
       const result = await apiService.getChatHistory()
       setChats(result.chats || [])
       
-      // If no current chat and we have chats, select the first one
       if (!currentChatId && result.chats && result.chats.length > 0) {
         setCurrentChatId(result.chats[0].id)
+        await loadChatDataset(result.chats[0].id)
       }
     } catch (error) {
       console.error('Failed to load chat history:', error)
     }
   }
 
+  const loadChatDataset = async (chatId) => {
+    try {
+      const datasetStatus = await apiService.getChatDatasetStatus(chatId)
+      if (datasetStatus.has_dataset) {
+        setDatasetLoaded(true)
+        setDatasetInfo(datasetStatus.dataset_info)
+        
+        // Get insights from chat status
+        try {
+          const status = await apiService.getChatStatus(chatId)
+          if (status.stage === 'complete') {
+            setInsights(status.insights || [])
+          }
+        } catch (error) {
+          console.log('Could not load insights for this chat')
+        }
+      } else {
+        setDatasetLoaded(false)
+        setDatasetInfo(null)
+        setInsights([])
+      }
+    } catch (error) {
+      console.log('No dataset for this chat')
+      setDatasetLoaded(false)
+      setDatasetInfo(null)
+      setInsights([])
+    }
+  }
+
   const switchToChat = async (chatId) => {
-    if (chatId === currentChatId) return // Don't switch if already current
+    if (chatId === currentChatId) return
     
     try {
       const result = await apiService.getChat(chatId)
@@ -135,45 +129,8 @@ export const AISheetChatProvider = ({ children }) => {
         
         setMessages(formattedMessages)
         
-        // Check if this chat has dataset loaded by checking welcome message
-        const hasWelcomeMessage = formattedMessages.some(msg => 
-          msg.type === 'assistant' && msg.content.includes('AI Analysis Ready')
-        )
-        
-        if (hasWelcomeMessage) {
-          // Try to restore dataset state
-          try {
-            const status = await apiService.getStatus()
-            if (status.stage === 'complete') {
-              setDatasetLoaded(true)
-              setDatasetInfo(status.dataset_info)
-              setInsights(status.insights || [])
-            } else {
-              // Check if there's a dataset available for this chat
-              const datasetStatus = await apiService.getChatDatasetStatus(chatId)
-              if (datasetStatus.has_dataset) {
-                setDatasetLoaded(true)
-                setDatasetInfo(datasetStatus.dataset_info)
-                setInsights([])
-              }
-            }
-          } catch (error) {
-            console.log('Could not restore dataset state for this chat')
-          }
-        } else {
-          // No welcome message - check if we should keep current dataset state
-          // Only clear if no dataset is available globally
-          try {
-            const status = await apiService.getStatus()
-            if (status.stage !== 'complete') {
-              setDatasetLoaded(false)
-              setDatasetInfo(null)
-              setInsights([])
-            }
-          } catch (error) {
-            // Keep current state if we can't check
-          }
-        }
+        // Load dataset for this specific chat
+        await loadChatDataset(chatId)
         
         await loadChatHistory()
       }
@@ -189,23 +146,20 @@ export const AISheetChatProvider = ({ children }) => {
       if (result.success) {
         toast.success('Chat deleted successfully')
         
-        // If we deleted the current chat
         if (chatId === currentChatId) {
-          // Find another chat to switch to
           const remainingChats = chats.filter(chat => chat.id !== chatId)
           
           if (remainingChats.length > 0) {
-            // Switch to the first remaining chat
             await switchToChat(remainingChats[0].id)
           } else {
-            // No chats left - clear messages but keep dataset if available
             setCurrentChatId(null)
             setMessages([])
-            // Don't clear dataset state - it persists across sessions
+            setDatasetLoaded(false)
+            setDatasetInfo(null)
+            setInsights([])
           }
         }
         
-        // Always reload chat history
         await loadChatHistory()
       } else {
         toast.error('Failed to delete chat')
@@ -232,7 +186,10 @@ export const AISheetChatProvider = ({ children }) => {
   }
 
   const uploadFile = async (file) => {
-    if (!file) return
+    if (!file || !currentChatId) {
+      toast.error('Please create or select a chat first')
+      return
+    }
 
     const allowedTypes = ['.csv', '.xlsx', '.xls']
     const fileExt = '.' + file.name.split('.').pop().toLowerCase()
@@ -254,11 +211,26 @@ export const AISheetChatProvider = ({ children }) => {
     try {
       toast.loading(`Uploading ${file.name}...`, { id: 'upload-progress' })
       
-      const result = await apiService.uploadFile(file)
+      const result = await apiService.uploadFileForChat(file, currentChatId)
       
       if (result.success) {
-        toast.success(`Processing ${file.name}...`, { id: 'upload-progress' })
-        startStatusMonitoring()
+        toast.success(`Dataset loaded successfully for this chat!`, { id: 'upload-progress' })
+        setIsUploading(false)
+        setProgress(100)
+        
+        // Reload dataset status for current chat
+        await loadChatDataset(currentChatId)
+        
+        // Add welcome message
+        const welcomeMessage = {
+          id: `welcome-${Date.now()}`,
+          type: 'assistant',
+          content: `🧠 **AI Analysis Ready!**\n\nI've analyzed your dataset and it's ready for questions!\n\nAsk me anything about your data - I understand natural language and provide complete results.`,
+          analysisType: 'ai_analysis',
+          timestamp: new Date().toISOString()
+        }
+        
+        setMessages([welcomeMessage])
       } else {
         toast.error(result.error || 'Upload failed', { id: 'upload-progress' })
         setIsUploading(false)
@@ -272,69 +244,8 @@ export const AISheetChatProvider = ({ children }) => {
     }
   }
 
-  const startStatusMonitoring = () => {
-    if (statusIntervalRef.current) {
-      clearInterval(statusIntervalRef.current)
-    }
-
-    statusIntervalRef.current = setInterval(async () => {
-      try {
-        const status = await apiService.getStatus()
-        setProgress(status.progress || 0)
-        
-        if (status.stage === 'complete') {
-          clearInterval(statusIntervalRef.current)
-          statusIntervalRef.current = null
-          onDatasetLoaded(status)
-        } else if (status.stage === 'error') {
-          clearInterval(statusIntervalRef.current)
-          statusIntervalRef.current = null
-          toast.error(status.error || 'Processing failed', { id: 'upload-progress' })
-          setIsUploading(false)
-          setUploadError(status.error)
-        }
-      } catch (error) {
-        console.error('Status check failed:', error)
-        clearInterval(statusIntervalRef.current)
-        statusIntervalRef.current = null
-        setIsUploading(false)
-        toast.error('Status check failed', { id: 'upload-progress' })
-      }
-    }, 1000)
-  }
-
-  const onDatasetLoaded = (status) => {
-    setDatasetLoaded(true)
-    setIsUploading(false)
-    setProgress(100)
-    setDatasetInfo(status.dataset_info)
-    setInsights(status.insights || [])
-    setUploadError(null)
-    
-    const welcomeMessage = {
-      id: `welcome-${Date.now()}`,
-      type: 'assistant',
-      content: `🧠 **AI Analysis Ready!**\n\n` +
-        `I've analyzed your dataset with **${status.dataset_info.shape.rows.toLocaleString()} rows** and **${status.dataset_info.shape.columns} columns**.\n\n` +
-        `📊 **File size:** ${status.dataset_info.file_size_formatted || `${status.dataset_info.file_size_mb} MB`}\n\n` +
-        `✨ **I can help you with:**\n` +
-        `• Natural language questions about your data\n` +
-        `• Pattern recognition and insights\n` +
-        `• Statistical analysis and summaries\n` +
-        `• Data filtering and visualization\n` +
-        `• Anomaly detection\n` +
-        `• Recommendations based on data\n\n` +
-        `Ask me anything! I understand natural language and provide complete results.`,
-      analysisType: 'ai_analysis',
-      timestamp: new Date().toISOString()
-    }
-    
-    setMessages([welcomeMessage])
-    toast.success('🎉 Dataset ready! Start asking questions about your data.', { id: 'upload-progress' })
-  }
-
   const sendMessage = async (message) => {
-    if (!datasetLoaded || isProcessing || !message.trim()) return
+    if (!datasetLoaded || isProcessing || !message.trim() || !currentChatId) return
 
     setIsProcessing(true)
     
@@ -351,7 +262,6 @@ export const AISheetChatProvider = ({ children }) => {
       const result = await apiService.sendQuery(message.trim(), currentChatId)
       
       if (result.success) {
-        // Check if this is a visualization request
         const isVisualizationRequest = message.toLowerCase().includes('visualiz') || 
                                      message.toLowerCase().includes('chart') || 
                                      message.toLowerCase().includes('graph') || 
@@ -406,7 +316,6 @@ export const AISheetChatProvider = ({ children }) => {
       
       if (numericColumns.length === 0) return null
       
-      // Create a simple bar chart data
       const chartData = {
         type: 'bar',
         data: {
@@ -441,23 +350,13 @@ export const AISheetChatProvider = ({ children }) => {
 
   const clearChat = async () => {
     setMessages([])
-    // Don't clear dataset state - it persists
-    // If we have a dataset loaded, add welcome message back
+    
+    // If we have a dataset loaded for this chat, add welcome message back
     if (datasetLoaded && datasetInfo) {
       const welcomeMessage = {
         id: `welcome-${Date.now()}`,
         type: 'assistant',
-        content: `🧠 **AI Analysis Ready!**\n\n` +
-          `I've analyzed your dataset with **${datasetInfo.shape.rows.toLocaleString()} rows** and **${datasetInfo.shape.columns} columns**.\n\n` +
-          `📊 **File size:** ${datasetInfo.file_size_formatted || `${datasetInfo.file_size_mb} MB`}\n\n` +
-          `✨ **I can help you with:**\n` +
-          `• Natural language questions about your data\n` +
-          `• Pattern recognition and insights\n` +
-          `• Statistical analysis and summaries\n` +
-          `• Data filtering and visualization\n` +
-          `• Anomaly detection\n` +
-          `• Recommendations based on data\n\n` +
-          `Ask me anything! I understand natural language and provide complete results.`,
+        content: `🧠 **AI Analysis Ready!**\n\nI've analyzed your dataset and it's ready for questions!\n\nAsk me anything about your data - I understand natural language and provide complete results.`,
         analysisType: 'ai_analysis',
         timestamp: new Date().toISOString()
       }

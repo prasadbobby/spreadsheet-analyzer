@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -32,12 +32,67 @@ import { cn } from '@/lib/utils'
 import DeleteChatDialog from '@/components/DeleteChatDialog'
 import AIInsightsModal from '@/components/AIInsightsModal'
 import RenameChatDialog from '@/components/RenameChatDialog'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+
+// Custom Dropdown Component
+const CustomDropdown = ({ children, trigger, isOpen, onOpenChange, align = 'right' }) => {
+  const dropdownRef = useRef(null)
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        onOpenChange(false)
+      }
+    }
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        onOpenChange(false)
+      }
+    }
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      document.addEventListener('keydown', handleEscape)
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside)
+        document.removeEventListener('keydown', handleEscape)
+      }
+    }
+  }, [isOpen, onOpenChange])
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      {trigger}
+      {isOpen && (
+        <div 
+          className={cn(
+            "absolute top-full mt-1 min-w-[140px] bg-white rounded-md shadow-lg border border-gray-200 py-1 z-[9999]",
+            "animate-in fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2",
+            align === 'right' ? 'right-0' : 'left-0'
+          )}
+          style={{ zIndex: 9999 }}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const DropdownItem = ({ children, onClick, className = '', variant = 'default' }) => {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center gap-2 transition-colors focus:bg-gray-100 focus:outline-none",
+        variant === 'destructive' && "text-red-600 hover:bg-red-50 focus:bg-red-50",
+        className
+      )}
+    >
+      {children}
+    </button>
+  )
+}
 
 export default function Sidebar() {
   const {
@@ -56,11 +111,13 @@ export default function Sidebar() {
     uploadFile
   } = useAISheetChat()
 
+  // Dialog states
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [chatToDelete, setChatToDelete] = useState(null)
   const [insightsModalOpen, setInsightsModalOpen] = useState(false)
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
   const [chatToRename, setChatToRename] = useState(null)
+  const [openDropdownId, setOpenDropdownId] = useState(null)
 
   const onDrop = useCallback((acceptedFiles, rejectedFiles) => {
     if (rejectedFiles.length > 0) {
@@ -79,36 +136,78 @@ export default function Sidebar() {
       'application/vnd.ms-excel': ['.xls']
     },
     multiple: false,
-    disabled: isUploading,
+    disabled: isUploading || !currentChatId,
     maxSize: 10 * 1024 * 1024 * 1024,
   })
 
-  const handleDeleteClick = (e, chat) => {
-    e.stopPropagation()
+  // Dropdown handlers
+  const handleDropdownToggle = (chatId, event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setOpenDropdownId(openDropdownId === chatId ? null : chatId)
+  }
+
+  const closeDropdown = () => {
+    setOpenDropdownId(null)
+  }
+
+  // Delete handlers
+  const handleDeleteClick = (chat, event) => {
+    event.preventDefault()
+    event.stopPropagation()
     setChatToDelete(chat)
     setDeleteDialogOpen(true)
+    closeDropdown()
   }
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = async () => {
     if (chatToDelete) {
-      deleteChat(chatToDelete.id)
-      setChatToDelete(null)
+      try {
+        await deleteChat(chatToDelete.id)
+      } catch (error) {
+        console.error('Error deleting chat:', error)
+      } finally {
+        setChatToDelete(null)
+      }
     }
   }
 
-  const handleRenameClick = (e, chat) => {
-    e.stopPropagation()
+  const handleDeleteCancel = () => {
+    setChatToDelete(null)
+    setDeleteDialogOpen(false)
+  }
+
+  // Rename handlers
+  const handleRenameClick = (chat, event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    
+    console.log('Opening rename dialog for:', chat.title)
+    
+    // Set the chat to rename and open dialog
     setChatToRename(chat)
     setRenameDialogOpen(true)
+    closeDropdown()
   }
 
-  const handleRenameConfirm = (newTitle) => {
-    if (chatToRename) {
-      renameChat(chatToRename.id, newTitle)
-      setChatToRename(null)
+  const handleRenameConfirm = async (newTitle) => {
+    if (chatToRename && newTitle.trim()) {
+      try {
+        await renameChat(chatToRename.id, newTitle.trim())
+        console.log('Chat renamed successfully')
+      } catch (error) {
+        console.error('Error renaming chat:', error)
+        throw error // Re-throw to keep dialog open on error
+      }
     }
   }
 
+  const handleRenameCancel = () => {
+    setChatToRename(null)
+    setRenameDialogOpen(false)
+  }
+
+  // File upload handler
   const handleFileInputChange = (e) => {
     const file = e.target.files?.[0]
     if (file) {
@@ -168,6 +267,11 @@ export default function Sidebar() {
           <div className="flex items-center gap-2 mb-4">
             <Upload className="h-4 w-4 text-gray-600" />
             <h3 className="text-sm font-semibold text-gray-800">Data Upload</h3>
+            {!currentChatId && (
+              <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-700">
+                Select chat first
+              </Badge>
+            )}
           </div>
           
           <div
@@ -177,18 +281,24 @@ export default function Sidebar() {
               "hover:border-primary hover:bg-primary/5",
               isDragActive && !isDragReject && "border-primary bg-primary/5",
               isDragReject && "border-red-300 bg-red-50",
-              isUploading && "opacity-60 cursor-not-allowed",
+              (isUploading || !currentChatId) && "opacity-60 cursor-not-allowed",
               uploadError && "border-red-300 bg-red-50"
             )}
           >
             <input 
               {...getInputProps()} 
               onChange={handleFileInputChange}
-              disabled={isUploading}
+              disabled={isUploading || !currentChatId}
             />
             
             <div className="relative z-10">
-              {isUploading ? (
+              {!currentChatId ? (
+                <div className="space-y-2">
+                  <MessageSquare className="h-8 w-8 mx-auto text-gray-400" />
+                  <div className="text-sm font-medium text-gray-700">Create or select a chat first</div>
+                  <div className="text-xs text-gray-500">Then upload your data file</div>
+                </div>
+              ) : isUploading ? (
                 <div className="space-y-3">
                   <Database className="h-8 w-8 mx-auto text-purple-600 animate-pulse" />
                   <div className="text-sm font-medium text-gray-700">Processing your file...</div>
@@ -204,7 +314,7 @@ export default function Sidebar() {
               ) : datasetLoaded ? (
                 <div className="space-y-2">
                   <CheckCircle className="h-8 w-8 mx-auto text-green-500" />
-                  <div className="text-sm font-medium text-green-700">Dataset ready</div>
+                  <div className="text-sm font-medium text-green-700">Dataset ready for this chat</div>
                   <div className="text-xs text-green-600">Click to upload new data</div>
                 </div>
               ) : (
@@ -226,6 +336,9 @@ export default function Sidebar() {
                 <div className="flex items-center gap-2 mb-3">
                   <PieChart className="h-4 w-4 text-purple-600" />
                   <span className="text-sm font-semibold text-gray-800">Dataset Overview</span>
+                  <Badge variant="secondary" className="text-xs bg-green-100 text-green-800 ml-auto">
+                    Active
+                  </Badge>
                 </div>
                 
                 <div className="grid grid-cols-1 gap-3">
@@ -245,7 +358,7 @@ export default function Sidebar() {
                 <div className="mt-3 p-2 bg-green-100 rounded-lg">
                   <div className="flex items-center gap-2">
                     <Activity className="h-3 w-3 text-green-600" />
-                    <span className="text-xs font-medium text-green-800">AI Analysis Ready</span>
+                    <span className="text-xs font-medium text-green-800">Ready for Analysis</span>
                   </div>
                 </div>
               </CardContent>
@@ -297,7 +410,7 @@ export default function Sidebar() {
                   <div className="text-center py-8">
                     <MessageSquare className="h-8 w-8 mx-auto text-gray-300 mb-2" />
                     <div className="text-sm text-gray-500">No sessions yet</div>
-                    <div className="text-xs text-gray-400">Start by uploading data</div>
+                    <div className="text-xs text-gray-400">Create a new session to start</div>
                   </div>
                 ) : (
                   chats.map((chat) => {
@@ -311,7 +424,6 @@ export default function Sidebar() {
                     return (
                       <div
                         key={chat.id}
-                        onClick={() => switchToChat(chat.id)}
                         className={cn(
                           "group relative p-3 rounded-lg cursor-pointer transition-all border",
                           "hover:shadow-md hover:bg-gray-50",
@@ -319,8 +431,9 @@ export default function Sidebar() {
                             ? "bg-purple-50 border-purple-200 shadow-sm" 
                             : "bg-white border-gray-100 hover:border-gray-200"
                         )}
+                        onClick={() => switchToChat(chat.id)}
                       >
-                        <div className="pr-8">
+                        <div className="pr-10">
                           <div className="flex items-center gap-2 mb-2">
                             <div className={cn(
                               "w-2 h-2 rounded-full",
@@ -349,33 +462,41 @@ export default function Sidebar() {
                           </div>
                         </div>
                         
-                        {/* Chat Actions Dropdown */}
-                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
+                        {/* Custom Dropdown Menu */}
+                        <div className="absolute top-2 right-2">
+                          <CustomDropdown
+                            isOpen={openDropdownId === chat.id}
+                            onOpenChange={(isOpen) => setOpenDropdownId(isOpen ? chat.id : null)}
+                            trigger={
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                className="h-6 w-6 p-0 hover:bg-gray-200"
-                                onClick={(e) => e.stopPropagation()}
+                                className={cn(
+                                  "h-6 w-6 p-0 hover:bg-gray-200/80 transition-all duration-200",
+                                  "opacity-0 group-hover:opacity-100",
+                                  chat.id === currentChatId && "opacity-100",
+                                  openDropdownId === chat.id && "opacity-100 bg-gray-200"
+                                )}
+                                onClick={(e) => handleDropdownToggle(chat.id, e)}
                               >
                                 <MoreVertical className="h-3 w-3" />
                               </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-48">
-                              <DropdownMenuItem onClick={(e) => handleRenameClick(e, chat)}>
-                                <Edit2 className="h-3 w-3 mr-2" />
-                                Rename
-                              </DropdownMenuItem>
-                              <DropdownMenuItem 
-                                onClick={(e) => handleDeleteClick(e, chat)}
-                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                              >
-                                <Trash2 className="h-3 w-3 mr-2" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                            }
+                          >
+                            <DropdownItem 
+                              onClick={(e) => handleRenameClick(chat, e)}
+                            >
+                              <Edit2 className="h-3 w-3" />
+                              Rename
+                            </DropdownItem>
+                            <DropdownItem 
+                              onClick={(e) => handleDeleteClick(chat, e)}
+                              variant="destructive"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              Delete
+                            </DropdownItem>
+                          </CustomDropdown>
                         </div>
                       </div>
                     )
@@ -390,7 +511,12 @@ export default function Sidebar() {
       {/* Delete Dialog */}
       <DeleteChatDialog
         open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
+        onOpenChange={(open) => {
+          setDeleteDialogOpen(open)
+          if (!open) {
+            setChatToDelete(null)
+          }
+        }}
         onConfirm={handleDeleteConfirm}
         chatTitle={chatToDelete?.title || ''}
       />
@@ -398,7 +524,12 @@ export default function Sidebar() {
       {/* Rename Dialog */}
       <RenameChatDialog
         open={renameDialogOpen}
-        onOpenChange={setRenameDialogOpen}
+        onOpenChange={(open) => {
+          setRenameDialogOpen(open)
+          if (!open) {
+            setChatToRename(null)
+          }
+        }}
         onConfirm={handleRenameConfirm}
         currentTitle={chatToRename?.title || ''}
       />
