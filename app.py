@@ -6,6 +6,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, date
 from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import uuid
 import traceback
@@ -18,6 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app, origins=["http://localhost:3000"], supports_credentials=True)
 
 # Configuration
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-default-secret-key-here')
@@ -68,6 +70,65 @@ def convert_dataframe_for_json(df):
     
     return df_copy.to_dict('records')
 
+def get_file_size_mb(file_path):
+    """Get accurate file size in MB"""
+    try:
+        if os.path.exists(file_path):
+            size_bytes = os.path.getsize(file_path)
+            size_mb = size_bytes / (1024 * 1024)
+            print(f"File size calculated: {size_bytes} bytes = {size_mb:.2f} MB")
+            return round(size_mb, 2)
+        else:
+            print(f"File not found: {file_path}")
+            return 0.0
+    except Exception as e:
+        print(f"Error calculating file size: {e}")
+        return 0.0
+    
+
+def get_file_size_formatted(file_path):
+    """Get file size with appropriate unit (B, KB, MB, GB)"""
+    try:
+        if os.path.exists(file_path):
+            size_bytes = os.path.getsize(file_path)
+            
+            # Convert to appropriate unit
+            if size_bytes < 1024:
+                size_str = f"{size_bytes} B"
+                size_mb = size_bytes / (1024 * 1024)
+            elif size_bytes < 1024 * 1024:  # Less than 1 MB
+                size_kb = size_bytes / 1024
+                size_str = f"{size_kb:.1f} KB"
+                size_mb = size_bytes / (1024 * 1024)
+            elif size_bytes < 1024 * 1024 * 1024:  # Less than 1 GB
+                size_mb = size_bytes / (1024 * 1024)
+                size_str = f"{size_mb:.1f} MB"
+            else:  # 1 GB or more
+                size_gb = size_bytes / (1024 * 1024 * 1024)
+                size_str = f"{size_gb:.1f} GB"
+                size_mb = size_bytes / (1024 * 1024)
+            
+            print(f"File size calculated: {size_bytes} bytes = {size_str}")
+            return {
+                'size_bytes': size_bytes,
+                'size_mb': round(size_mb, 3),  # Keep MB for internal calculations
+                'size_formatted': size_str      # Human readable format
+            }
+        else:
+            print(f"File not found: {file_path}")
+            return {
+                'size_bytes': 0,
+                'size_mb': 0.0,
+                'size_formatted': '0 B'
+            }
+    except Exception as e:
+        print(f"Error calculating file size: {e}")
+        return {
+            'size_bytes': 0,
+            'size_mb': 0.0,
+            'size_formatted': '0 B'
+        }
+
 class DirectMCPProcessor:
     """Direct MCP-style data processor without external server"""
     def __init__(self):
@@ -84,7 +145,15 @@ class DirectMCPProcessor:
         try:
             print(f"Loading dataset from: {file_path}")
             
+            # Verify file exists and get size immediately
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"File not found: {file_path}")
+            
+            file_size_info = get_file_size_formatted(file_path)
             file_extension = Path(file_path).suffix.lower()
+            file_name = Path(file_path).name
+            
+            print(f"Processing file: {file_name} ({file_size_info['size_formatted']})")
             
             # Get basic info without loading full dataset
             if file_extension == '.csv':
@@ -133,14 +202,19 @@ class DirectMCPProcessor:
             # Store dataset info with JSON-safe data
             self.dataset_info = {
                 'file_path': file_path,
+                'file_name': file_name,
                 'total_rows': int(total_rows),
                 'total_columns': int(len(sample_df.columns)),
                 'columns': list(sample_df.columns),
                 'dtypes': {col: str(dtype) for col, dtype in sample_df.dtypes.items()},
                 'sample_data': convert_dataframe_for_json(sample_df_json_safe.head(5)),
-                'file_size_mb': float(os.path.getsize(file_path) / (1024 * 1024)),
+                'file_size_mb': file_size_info['size_mb'],           # For internal calculations
+                'file_size_formatted': file_size_info['size_formatted'],  # For display
+                'file_size_bytes': file_size_info['size_bytes'],     # Raw bytes
                 'cleaned_columns': [self._clean_column_name(col) for col in sample_df.columns]
             }
+            
+            print(f"Stored dataset info with file size: {file_size_info['size_formatted']}")
             
             # Create SQLite database for efficient querying
             self.sqlite_path = file_path.replace(file_extension, '.db')
@@ -156,7 +230,6 @@ class DirectMCPProcessor:
             print(f"Error loading dataset: {e}")
             traceback.print_exc()
             return False
-    
     def _clean_column_name(self, col_name):
         """Clean column names for SQLite compatibility"""
         import re
@@ -712,7 +785,7 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """Handle file upload"""
+    """Handle file upload with accurate file size tracking"""
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'No file selected'})
     
@@ -732,7 +805,17 @@ def upload_file():
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         
         print(f"Saving file to: {file_path}")
+        
+        # Save the file first
         file.save(file_path)
+        
+        # Verify file was saved and get size
+        if os.path.exists(file_path):
+            actual_size = get_file_size_mb(file_path)
+            print(f"File saved successfully. Size: {actual_size} MB")
+        else:
+            print("ERROR: File was not saved properly")
+            return jsonify({'success': False, 'error': 'File save failed'})
         
         # Process through MCP processor
         success = mcp_processor.load_dataset(file_path)
@@ -744,24 +827,65 @@ def upload_file():
             
     except Exception as e:
         print(f"Upload error: {e}")
+        traceback.print_exc()
         return jsonify({'success': False, 'error': f'Upload failed: {str(e)}'})
+
+@app.route('/chat/<chat_id>/rename', methods=['PUT'])
+def rename_chat(chat_id):
+    """Rename a specific chat"""
+    try:
+        data = request.get_json()
+        new_title = data.get('title', '').strip()
+        
+        if not new_title:
+            return jsonify({'success': False, 'error': 'Title is required'})
+        
+        if len(new_title) > 100:
+            return jsonify({'success': False, 'error': 'Title is too long'})
+        
+        conn = sqlite3.connect('data/chat_history.db')
+        cursor = conn.cursor()
+        
+        # Update the chat title
+        cursor.execute('''
+            UPDATE chats SET title = ?, updated_at = ?
+            WHERE id = ?
+        ''', (new_title, datetime.now(), chat_id))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Chat not found'})
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'Chat renamed successfully'})
+        
+    except Exception as e:
+        print(f"Error renaming chat: {e}")
+        return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/status')
 def get_status():
-    """Get dataset status"""
+    """Get dataset status with persistent information"""
     if mcp_processor.dataset_info:
         info = mcp_processor.dataset_info
+        print(f"Returning status with file_size_formatted: {info.get('file_size_formatted', '0 B')}")
         return jsonify({
             'stage': 'complete',
             'progress': 100,
             'dataset_info': {
                 'shape': {'rows': info['total_rows'], 'columns': info['total_columns']},
                 'columns': info['columns'],
-                'file_size_mb': info['file_size_mb']
+                'file_size_mb': info['file_size_mb'],
+                'file_size_formatted': info['file_size_formatted'],
+                'file_size_bytes': info['file_size_bytes'],
+                'file_name': info.get('file_name', 'Unknown'),
+                'file_path': info.get('file_path', '')
             },
             'insights': [
                 f"✅ Dataset loaded: {info['total_rows']:,} rows × {info['total_columns']} columns",
-                f"📊 File size: {info['file_size_mb']:.1f} MB",
+                f"📊 File size: {info['file_size_formatted']}",
                 f"🗃️ SQLite database created for efficient querying",
                 f"🤖 Ready for natural language analysis",
                 f"⚡ Handles any dataset size and width"
@@ -791,6 +915,33 @@ def create_new_chat():
     conn.close()
     
     return jsonify({'success': True, 'chat_id': chat_id})
+
+@app.route('/chat/<chat_id>/dataset-status')
+def get_chat_dataset_status(chat_id):
+    """Check if there's an active dataset for this chat"""
+    try:
+        # Check if we have dataset info and if the file still exists
+        if mcp_processor.dataset_info and mcp_processor.dataset_info.get('file_path'):
+            file_path = mcp_processor.dataset_info['file_path']
+            if os.path.exists(file_path):
+                return jsonify({
+                    'has_dataset': True,
+                    'dataset_info': {
+                        'shape': {
+                            'rows': mcp_processor.dataset_info['total_rows'], 
+                            'columns': mcp_processor.dataset_info['total_columns']
+                        },
+                        'columns': mcp_processor.dataset_info['columns'],
+                        'file_size_formatted': mcp_processor.dataset_info.get('file_size_formatted', '0 B'),
+                        'file_name': mcp_processor.dataset_info.get('file_name', 'Unknown')
+                    }
+                })
+        
+        return jsonify({'has_dataset': False})
+        
+    except Exception as e:
+        print(f"Error checking dataset status: {e}")
+        return jsonify({'has_dataset': False})
 
 @app.route('/chat/<chat_id>/delete', methods=['DELETE'])
 def delete_chat(chat_id):
