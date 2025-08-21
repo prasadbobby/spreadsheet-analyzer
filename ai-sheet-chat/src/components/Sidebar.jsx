@@ -23,7 +23,8 @@ import {
   PieChart,
   Activity,
   Edit2,
-  MoreVertical
+  MoreVertical,
+  GitMerge
 } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
 import { useAISheetChat } from '@/contexts/AISheetChatContext'
@@ -108,7 +109,8 @@ export default function Sidebar() {
     switchToChat,
     deleteChat,
     renameChat,
-    uploadFile
+    uploadFile,
+    sendMessage
   } = useAISheetChat()
 
   // Dialog states
@@ -181,10 +183,6 @@ export default function Sidebar() {
   const handleRenameClick = (chat, event) => {
     event.preventDefault()
     event.stopPropagation()
-    
-    console.log('Opening rename dialog for:', chat.title)
-    
-    // Set the chat to rename and open dialog
     setChatToRename(chat)
     setRenameDialogOpen(true)
     closeDropdown()
@@ -194,10 +192,9 @@ export default function Sidebar() {
     if (chatToRename && newTitle.trim()) {
       try {
         await renameChat(chatToRename.id, newTitle.trim())
-        console.log('Chat renamed successfully')
       } catch (error) {
         console.error('Error renaming chat:', error)
-        throw error // Re-throw to keep dialog open on error
+        throw error
       }
     }
   }
@@ -206,6 +203,14 @@ export default function Sidebar() {
     setChatToRename(null)
     setRenameDialogOpen(false)
   }
+
+  // FIXED: Similarity analysis through chat instead of tabs
+  const handleSimilarityAnalysis = useCallback(() => {
+    if (datasetLoaded && currentChatId) {
+      const analysisMessage = "Perform comprehensive similarity analysis on this dataset. Find duplicates, near-duplicates, and semantically similar records. Include exact matches, similarity scores, and pattern recognition. Show detailed analysis with groupings and recommendations."
+      sendMessage(analysisMessage)
+    }
+  }, [datasetLoaded, currentChatId, sendMessage])
 
   // File upload handler
   const handleFileInputChange = (e) => {
@@ -386,6 +391,25 @@ export default function Sidebar() {
                   <Badge variant="secondary" className="ml-auto bg-purple-100 text-purple-800">
                     {insights.length}
                   </Badge>
+                </div>
+              </Button>
+            )}
+
+            {/* FIXED: Similarity Analysis Button */}
+            {datasetLoaded && currentChatId && (
+              <Button
+                variant="ghost"
+                className="w-full justify-start p-3 h-auto hover:bg-primary/10"
+                onClick={handleSimilarityAnalysis}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center">
+                    <GitMerge className="h-4 w-4 text-orange-600" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-sm font-medium text-gray-900">Similarity Analysis</div>
+                    <div className="text-xs text-gray-500">Find duplicates & patterns</div>
+                  </div>
                 </div>
               </Button>
             )}

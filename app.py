@@ -1,4 +1,5 @@
-# app.py
+# app.py - Complete updated version with all fixes
+
 import os
 import json
 import sqlite3
@@ -17,6 +18,11 @@ from dotenv import load_dotenv
 import mimetypes
 import xml.etree.ElementTree as ET
 from io import StringIO
+import re
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from collections import defaultdict, Counter
+import difflib
 
 # Load environment variables
 load_dotenv()
@@ -354,6 +360,478 @@ def read_generic_xml(content):
     except Exception as e:
         print(f"Generic XML parsing failed: {e}")
         raise Exception(f"Could not parse XML structure: {e}")
+
+class SimilarityAnalyzer:
+    """Advanced similarity detection for any dataset"""
+    
+    def __init__(self):
+        self.vectorizer = None
+        self.embeddings_cache = {}
+    
+    def analyze_dataset_similarity(self, dataset_info, chat_id, analysis_type='comprehensive', 
+                                 threshold=0.7, search_query='', categories=None):
+        """Main similarity analysis function"""
+        try:
+            sqlite_path = dataset_info['sqlite_path']
+            
+            # Get sample data for analysis
+            sample_data = self._get_sample_data(sqlite_path, search_query, limit=1000)
+            
+            if not sample_data:
+                return {'success': False, 'error': 'No data to analyze'}
+            
+            results = {}
+            
+            if analysis_type in ['comprehensive', 'duplicates']:
+                results['duplicates'] = self._find_duplicates(sample_data, threshold)
+            
+            if analysis_type in ['comprehensive', 'semantic']:
+                results['semantic_groups'] = self._find_semantic_similarity(sample_data, threshold)
+            
+            if analysis_type in ['comprehensive', 'categorical']:
+                results['categories'] = self._smart_categorization(sample_data)
+            
+            # Generate analysis summary
+            summary = self._generate_analysis_summary(results, analysis_type)
+            
+            # Prepare results for display
+            display_data = self._prepare_display_data(results, sample_data)
+            
+            return {
+                'success': True,
+                'results': {
+                    'data': display_data,
+                    'summary': summary,
+                    'total_matches': len(display_data),
+                    'analysis_type': analysis_type,
+                    'threshold': threshold
+                }
+            }
+            
+        except Exception as e:
+            print(f"Similarity analysis error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _get_sample_data(self, sqlite_path, search_query='', limit=1000):
+        """Get sample data from SQLite database"""
+        try:
+            conn = sqlite3.connect(sqlite_path)
+            
+            if search_query:
+                # Dynamic search across all text columns
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(data)")
+                columns = [row[1] for row in cursor.fetchall()]
+                
+                where_conditions = []
+                for col in columns:
+                    where_conditions.append(f'"{col}" LIKE ?')
+                
+                where_clause = ' OR '.join(where_conditions)
+                search_pattern = f'%{search_query}%'
+                search_params = [search_pattern] * len(columns)
+                
+                query = f'SELECT * FROM data WHERE {where_clause} LIMIT {limit}'
+                cursor.execute(query, search_params)
+            else:
+                query = f'SELECT * FROM data LIMIT {limit}'
+                cursor.execute(query)
+            
+            columns = [desc[0] for desc in cursor.description]
+            rows = cursor.fetchall()
+            
+            data = []
+            for row in rows:
+                record = {}
+                for i, col in enumerate(columns):
+                    record[col] = row[i]
+                data.append(record)
+            
+            conn.close()
+            return data
+            
+        except Exception as e:
+            print(f"Error getting sample data: {e}")
+            return []
+    
+    def _find_duplicates(self, data, threshold=0.8):
+        """Find exact and near-duplicate records"""
+        duplicates = []
+        exact_duplicates = defaultdict(list)
+        near_duplicates = []
+        
+        # Find exact duplicates
+        for i, record in enumerate(data):
+            # Create a signature from all text fields
+            text_fields = []
+            for key, value in record.items():
+                if isinstance(value, str) and len(value.strip()) > 0:
+                    text_fields.append(value.strip().lower())
+            
+            signature = '|'.join(sorted(text_fields))
+            exact_duplicates[signature].append({'index': i, 'record': record})
+        
+        # Process exact duplicates
+        for signature, records in exact_duplicates.items():
+            if len(records) > 1:
+                duplicates.append({
+                    'type': 'exact',
+                    'similarity_score': 1.0,
+                    'records': records,
+                    'count': len(records)
+                })
+        
+        # Find near-duplicates using text similarity
+        processed_indices = set()
+        for i, record1 in enumerate(data):
+            if i in processed_indices:
+                continue
+                
+            text1 = self._extract_text_content(record1)
+            if not text1:
+                continue
+                
+            similar_records = [{'index': i, 'record': record1, 'similarity': 1.0}]
+            
+            for j, record2 in enumerate(data[i+1:], i+1):
+                if j in processed_indices:
+                    continue
+                    
+                text2 = self._extract_text_content(record2)
+                if not text2:
+                    continue
+                
+                similarity = self._calculate_text_similarity(text1, text2)
+                
+                if similarity >= threshold:
+                    similar_records.append({
+                        'index': j, 
+                        'record': record2, 
+                        'similarity': similarity
+                    })
+                    processed_indices.add(j)
+            
+            if len(similar_records) > 1:
+                processed_indices.add(i)
+                near_duplicates.append({
+                    'type': 'near_duplicate',
+                    'similarity_score': max(r['similarity'] for r in similar_records[1:]),
+                    'records': similar_records,
+                    'count': len(similar_records)
+                })
+        
+        return {
+            'exact_duplicates': [d for d in duplicates if d['type'] == 'exact'],
+            'near_duplicates': near_duplicates,
+            'total_duplicate_groups': len(duplicates) + len(near_duplicates)
+        }
+    
+    def _find_semantic_similarity(self, data, threshold=0.7):
+        """Find semantically similar records using TF-IDF and cosine similarity"""
+        try:
+            # Extract text content from all records
+            texts = []
+            valid_indices = []
+            
+            for i, record in enumerate(data):
+                text = self._extract_text_content(record)
+                if text and len(text.strip()) > 5:  # Only non-empty texts
+                    texts.append(text)
+                    valid_indices.append(i)
+            
+            if len(texts) < 2:
+                return {'groups': [], 'total_groups': 0}
+            
+            # Create TF-IDF vectors
+            vectorizer = TfidfVectorizer(
+                max_features=1000,
+                stop_words='english',
+                ngram_range=(1, 2),
+                min_df=1,
+                max_df=0.95
+            )
+            
+            tfidf_matrix = vectorizer.fit_transform(texts)
+            
+            # Calculate cosine similarity matrix
+            similarity_matrix = cosine_similarity(tfidf_matrix)
+            
+            # Find similarity groups
+            groups = []
+            processed_indices = set()
+            
+            for i in range(len(texts)):
+                if i in processed_indices:
+                    continue
+                
+                # Find all records similar to current record
+                similar_indices = []
+                for j in range(len(texts)):
+                    if i != j and similarity_matrix[i][j] >= threshold:
+                        similar_indices.append(j)
+                
+                if similar_indices:
+                    # Create group
+                    group_records = [{'index': valid_indices[i], 'record': data[valid_indices[i]], 'similarity': 1.0}]
+                    
+                    for j in similar_indices:
+                        if j not in processed_indices:
+                            group_records.append({
+                                'index': valid_indices[j],
+                                'record': data[valid_indices[j]],
+                                'similarity': similarity_matrix[i][j]
+                            })
+                            processed_indices.add(j)
+                    
+                    groups.append({
+                        'type': 'semantic_group',
+                        'avg_similarity': np.mean([r['similarity'] for r in group_records]),
+                        'records': group_records,
+                        'count': len(group_records),
+                        'keywords': self._extract_group_keywords(vectorizer, tfidf_matrix, [i] + similar_indices)
+                    })
+                    
+                    processed_indices.add(i)
+            
+            return {
+                'groups': groups,
+                'total_groups': len(groups)
+            }
+            
+        except Exception as e:
+            print(f"Semantic similarity error: {e}")
+            return {'groups': [], 'total_groups': 0}
+    
+    def _smart_categorization(self, data):
+        """Automatic categorization and pattern recognition"""
+        categories = defaultdict(list)
+        patterns = defaultdict(int)
+        
+        # Analyze patterns in the data
+        for i, record in enumerate(data):
+            # Extract categorizable features
+            text_content = self._extract_text_content(record)
+            
+            # Simple keyword-based categorization
+            keywords = self._extract_keywords(text_content)
+            
+            # Categorize by dominant keywords
+            if keywords:
+                primary_category = max(keywords.items(), key=lambda x: x[1])[0]
+                categories[primary_category].append({
+                    'index': i,
+                    'record': record,
+                    'keywords': keywords
+                })
+            
+            # Pattern detection (e.g., email patterns, ID patterns, etc.)
+            detected_patterns = self._detect_patterns(record)
+            for pattern in detected_patterns:
+                patterns[pattern] += 1
+        
+        # Priority scoring
+        priority_scores = {}
+        for category, records in categories.items():
+            # Score based on frequency and keyword strength
+            score = len(records) * sum(
+                max(r['keywords'].values()) for r in records if r['keywords']
+            ) / len(records) if records else 0
+            priority_scores[category] = score
+        
+        return {
+            'categories': dict(categories),
+            'patterns': dict(patterns),
+            'priority_scores': priority_scores,
+            'total_categories': len(categories)
+        }
+    
+    def _extract_text_content(self, record):
+        """Extract all text content from a record"""
+        text_parts = []
+        for key, value in record.items():
+            if isinstance(value, str) and len(value.strip()) > 0:
+                # Clean and normalize text
+                cleaned = re.sub(r'[^\w\s]', ' ', str(value))
+                cleaned = ' '.join(cleaned.split())
+                text_parts.append(cleaned)
+        return ' '.join(text_parts)
+    
+    def _calculate_text_similarity(self, text1, text2):
+        """Calculate similarity between two texts using multiple methods"""
+        # Method 1: Sequence matching
+        seq_similarity = difflib.SequenceMatcher(None, text1.lower(), text2.lower()).ratio()
+        
+        # Method 2: Word overlap
+        words1 = set(text1.lower().split())
+        words2 = set(text2.lower().split())
+        
+        if not words1 or not words2:
+            return seq_similarity
+        
+        intersection = words1 & words2
+        union = words1 | words2
+        jaccard_similarity = len(intersection) / len(union) if union else 0
+        
+        # Combined score
+        return (seq_similarity + jaccard_similarity) / 2
+    
+    def _extract_keywords(self, text, top_k=5):
+        """Extract important keywords from text"""
+        if not text:
+            return {}
+        
+        # Simple frequency-based keyword extraction
+        words = re.findall(r'\b\w+\b', text.lower())
+        words = [w for w in words if len(w) > 3]  # Filter short words
+        
+        # Common stop words to exclude
+        stop_words = {'this', 'that', 'with', 'have', 'will', 'from', 'they', 'been', 'have', 'were', 'said', 'each', 'which', 'their', 'time', 'would', 'about', 'there', 'could', 'other', 'more', 'very', 'what', 'know', 'just', 'first', 'into', 'over', 'think', 'also', 'your', 'work', 'life', 'only', 'can', 'still', 'should', 'after', 'being', 'now', 'made', 'before', 'here', 'through', 'when', 'where', 'much', 'some', 'these', 'many', 'then', 'them', 'well', 'were'}
+        
+        words = [w for w in words if w not in stop_words]
+        
+        word_counts = Counter(words)
+        return dict(word_counts.most_common(top_k))
+    
+    def _detect_patterns(self, record):
+        """Detect common patterns in record fields"""
+        patterns = []
+        
+        for key, value in record.items():
+            if not isinstance(value, str):
+                continue
+                
+            value_str = str(value).strip()
+            
+            # Email pattern
+            if re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', value_str):
+                patterns.append('email')
+            
+            # Phone pattern
+            elif re.match(r'^[\+]?[1-9]?[0-9]{7,15}$', re.sub(r'[^\d\+]', '', value_str)):
+                patterns.append('phone')
+            
+            # URL pattern
+            elif re.match(r'^https?://', value_str):
+                patterns.append('url')
+            
+            # ID pattern (alphanumeric)
+            elif re.match(r'^[A-Z0-9]{5,}$', value_str):
+                patterns.append('id_code')
+            
+            # Date pattern
+            elif re.match(r'\d{4}-\d{2}-\d{2}', value_str) or re.match(r'\d{2}/\d{2}/\d{4}', value_str):
+                patterns.append('date')
+            
+            # Number pattern
+            elif re.match(r'^\d+\.?\d*$', value_str):
+                patterns.append('numeric')
+        
+        return patterns
+    
+    def _extract_group_keywords(self, vectorizer, tfidf_matrix, indices):
+        """Extract keywords that define a similarity group"""
+        try:
+            # Get feature names
+            feature_names = vectorizer.get_feature_names_out()
+            
+            # Average TF-IDF scores for the group
+            group_tfidf = tfidf_matrix[indices].mean(axis=0).A1
+            
+            # Get top keywords
+            top_indices = group_tfidf.argsort()[-10:][::-1]
+            keywords = [(feature_names[i], group_tfidf[i]) for i in top_indices if group_tfidf[i] > 0]
+            
+            return keywords[:5]  # Return top 5 keywords
+            
+        except Exception as e:
+            print(f"Error extracting group keywords: {e}")
+            return []
+    
+    def _generate_analysis_summary(self, results, analysis_type):
+        """Generate human-readable analysis summary"""
+        summary_parts = []
+        
+        if 'duplicates' in results:
+            dup_data = results['duplicates']
+            exact_count = len(dup_data['exact_duplicates'])
+            near_count = len(dup_data['near_duplicates'])
+            
+            if exact_count > 0:
+                summary_parts.append(f"Found {exact_count} exact duplicate groups")
+            if near_count > 0:
+                summary_parts.append(f"Found {near_count} near-duplicate groups")
+        
+        if 'semantic_groups' in results:
+            semantic_data = results['semantic_groups']
+            group_count = semantic_data['total_groups']
+            if group_count > 0:
+                summary_parts.append(f"Identified {group_count} semantic similarity groups")
+        
+        if 'categories' in results:
+            cat_data = results['categories']
+            cat_count = cat_data['total_categories']
+            if cat_count > 0:
+                summary_parts.append(f"Automatically categorized into {cat_count} groups")
+                
+                # Top patterns
+                patterns = cat_data['patterns']
+                if patterns:
+                    top_pattern = max(patterns.items(), key=lambda x: x[1])
+                    summary_parts.append(f"Most common pattern: {top_pattern[0]} ({top_pattern[1]} occurrences)")
+        
+        if not summary_parts:
+            summary_parts.append("No significant similarity patterns detected")
+        
+        return "\n".join(summary_parts)
+    
+    def _prepare_display_data(self, results, original_data):
+        """Prepare similarity results for table display"""
+        display_records = []
+        
+        # Process duplicates
+        if 'duplicates' in results:
+            for dup_group in results['duplicates']['exact_duplicates']:
+                for i, record_info in enumerate(dup_group['records']):
+                    display_record = record_info['record'].copy()
+                    display_record['_similarity_type'] = 'Exact Duplicate'
+                    display_record['_similarity_score'] = '100%'
+                    display_record['_group_id'] = f"exact_{len(display_records) // 10}"
+                    display_record['_group_size'] = dup_group['count']
+                    display_records.append(display_record)
+            
+            for dup_group in results['duplicates']['near_duplicates']:
+                for i, record_info in enumerate(dup_group['records']):
+                    display_record = record_info['record'].copy()
+                    display_record['_similarity_type'] = 'Near Duplicate'
+                    display_record['_similarity_score'] = f"{record_info['similarity']:.1%}"
+                    display_record['_group_id'] = f"near_{len(display_records) // 10}"
+                    display_record['_group_size'] = dup_group['count']
+                    display_records.append(display_record)
+        
+        # Process semantic groups
+        if 'semantic_groups' in results:
+            for group in results['semantic_groups']['groups']:
+                for record_info in group['records']:
+                    display_record = record_info['record'].copy()
+                    display_record['_similarity_type'] = 'Semantic Match'
+                    display_record['_similarity_score'] = f"{record_info['similarity']:.1%}"
+                    display_record['_group_id'] = f"semantic_{len(display_records) // 10}"
+                    display_record['_group_size'] = group['count']
+                    if group['keywords']:
+                        display_record['_keywords'] = ', '.join([kw[0] for kw in group['keywords'][:3]])
+                    display_records.append(display_record)
+        
+        # Process categories
+        if 'categories' in results:
+            for category, records in results['categories']['categories'].items():
+                for record_info in records:
+                    display_record = record_info['record'].copy()
+                    display_record['_similarity_type'] = 'Category Match'
+                    display_record['_category'] = category
+                    display_record['_group_size'] = len(records)
+                    display_records.append(display_record)
+        
+        return display_records
 
 class ChatMCPProcessor:
     """Chat-specific MCP processor for maintaining dataset isolation"""
@@ -1058,19 +1536,75 @@ Generate SQLite query:
             print(f"Error executing SQL: {e}")
             return None
     
+   
     def _generate_response(self, question, sql_query, results, dataset_info):
-        """Generate response for the chat"""
-        try:
-            result_count = len(results)
-            
-            if result_count > 20:
-                results_for_ai = results[:10]
-            else:
-                results_for_ai = results
-            
-            results_json = safe_json_dumps(results_for_ai)
-            
-            prompt = f"""
+       """Generate response for the chat with enhanced similarity detection"""
+       try:
+           result_count = len(results)
+           
+           # Check if this is a similarity-related query
+           similarity_keywords = [
+               'similar', 'duplicate', 'duplicates', 'matching', 'match', 
+               'same', 'identical', 'comparable', 'related', 'like', 
+               'resembling', 'equivalent', 'parallel', 'analogous'
+           ]
+           
+           is_similarity_query = any(keyword in question.lower() for keyword in similarity_keywords)
+           
+           if result_count > 20:
+               results_for_ai = results[:10]
+           else:
+               results_for_ai = results
+           
+           results_json = safe_json_dumps(results_for_ai)
+           
+           if is_similarity_query:
+               # Enhanced prompt for similarity queries
+               prompt = f"""
+You are an expert data analyst specializing in similarity detection and pattern recognition. The user asked: "{question}"
+
+DATASET CONTEXT: You analyzed {result_count:,} total results from a dataset with {dataset_info['total_rows']:,} rows and {dataset_info['total_columns']} columns.
+
+SQL EXECUTED: {sql_query}
+SAMPLE RESULTS (first 10 of {result_count}): {results_json}
+
+Provide a comprehensive similarity analysis that includes:
+
+1. **SIMILARITY OVERVIEW**: Start with "I found {result_count:,} results for your similarity analysis..."
+
+2. **DUPLICATE DETECTION**: 
+  - Identify exact duplicates (identical values across key fields)
+  - Find near-duplicates (high similarity but not identical)
+  - Show percentage of duplicates found
+
+3. **SEMANTIC SIMILARITY**: 
+  - Group records by semantic meaning and context
+  - Identify records that are conceptually similar even with different wording
+  - Explain the similarity reasoning
+
+4. **PATTERN ANALYSIS**:
+  - Common patterns across similar records
+  - Key distinguishing features
+  - Anomalies or outliers
+
+5. **SIMILARITY SCORES**: 
+  - Provide similarity percentages where applicable
+  - Explain the basis for similarity calculations
+
+6. **ACTIONABLE INSIGHTS**:
+  - Data quality recommendations
+  - Potential cleanup suggestions
+  - Priority actions for handling duplicates
+
+7. **CATEGORIZATION**: Group similar items into logical categories
+
+The complete analysis data with all {result_count:,} results is available in the table below for detailed examination.
+
+Be specific, analytical, and provide concrete examples from the data.
+"""
+           else:
+               # Standard analysis prompt
+               prompt = f"""
 You are a data analyst explaining query results. The user asked: "{question}"
 
 IMPORTANT: You analyzed the COMPLETE dataset with {result_count:,} total results.
@@ -1090,476 +1624,509 @@ Start your response with: "I found {result_count:,} results for your query about
 Response:
 """
 
-            response = self._call_gemini_api(prompt)
-            return response
-            
-        except Exception as e:
-            print(f"Error generating response: {e}")
-            return f"Query executed successfully. Found {len(results):,} results in the dataset."
-    
+           response = self._call_gemini_api(prompt)
+           return response
+           
+       except Exception as e:
+           print(f"Error generating response: {e}")
+           return f"Query executed successfully. Found {len(results):,} results in the dataset."
+   
     def _call_gemini_api(self, prompt):
-        """Call Gemini API"""
-        headers = {'Content-Type': 'application/json'}
-        
-        data = {
-            'contents': [{'parts': [{'text': prompt}]}],
-            'generationConfig': {
-                'temperature': 0.1,
-                'topP': 0.8,
-                'topK': 40,
-                'maxOutputTokens': 2000,
-            }
-        }
-        
-        try:
-            response = requests.post(
-                f"{self.gemini_url}?key={self.gemini_api_key}",
-                headers=headers,
-                json=data,
-                timeout=30,
-                verify=False
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                if 'candidates' in result and result['candidates']:
-                    return result['candidates'][0]['content']['parts'][0]['text']
-                else:
-                    raise Exception("No response from Gemini")
-            else:
-                raise Exception(f"Gemini API error: {response.status_code}")
-                
-        except Exception as e:
-            print(f"Gemini API error: {e}")
-            raise e
+       """Call Gemini API"""
+       headers = {'Content-Type': 'application/json'}
+       
+       data = {
+           'contents': [{'parts': [{'text': prompt}]}],
+           'generationConfig': {
+               'temperature': 0.1,
+               'topP': 0.8,
+               'topK': 40,
+               'maxOutputTokens': 2000,
+           }
+       }
+       
+       try:
+           response = requests.post(
+               f"{self.gemini_url}?key={self.gemini_api_key}",
+               headers=headers,
+               json=data,
+               timeout=30,
+               verify=False
+           )
+           
+           if response.status_code == 200:
+               result = response.json()
+               if 'candidates' in result and result['candidates']:
+                   return result['candidates'][0]['content']['parts'][0]['text']
+               else:
+                   raise Exception("No response from Gemini")
+           else:
+               raise Exception(f"Gemini API error: {response.status_code}")
+               
+       except Exception as e:
+           print(f"Gemini API error: {e}")
+           raise e
 
-# Global chat processor instance
+# Global instances
 chat_processor = ChatMCPProcessor()
+similarity_analyzer = SimilarityAnalyzer()
 
 def init_db():
-    """Initialize chat history database"""
-    conn = sqlite3.connect('data/chat_history.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS chats (
-            id TEXT PRIMARY KEY,
-            title TEXT,
-            created_at TIMESTAMP,
-            updated_at TIMESTAMP
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id TEXT,
-            type TEXT,
-            content TEXT,
-            query TEXT,
-            result TEXT,
-            timestamp TIMESTAMP,
-            FOREIGN KEY (chat_id) REFERENCES chats (id)
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS chat_datasets (
-            chat_id TEXT PRIMARY KEY,
-            dataset_info TEXT,
-            file_path TEXT,
-            sqlite_path TEXT,
-            created_at TIMESTAMP,
-            FOREIGN KEY (chat_id) REFERENCES chats (id)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
+   """Initialize chat history database"""
+   conn = sqlite3.connect('data/chat_history.db')
+   cursor = conn.cursor()
+   
+   cursor.execute('''
+       CREATE TABLE IF NOT EXISTS chats (
+           id TEXT PRIMARY KEY,
+           title TEXT,
+           created_at TIMESTAMP,
+           updated_at TIMESTAMP
+       )
+   ''')
+   
+   cursor.execute('''
+       CREATE TABLE IF NOT EXISTS messages (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           chat_id TEXT,
+           type TEXT,
+           content TEXT,
+           query TEXT,
+           result TEXT,
+           timestamp TIMESTAMP,
+           FOREIGN KEY (chat_id) REFERENCES chats (id)
+       )
+   ''')
+   
+   cursor.execute('''
+       CREATE TABLE IF NOT EXISTS chat_datasets (
+           chat_id TEXT PRIMARY KEY,
+           dataset_info TEXT,
+           file_path TEXT,
+           sqlite_path TEXT,
+           created_at TIMESTAMP,
+           FOREIGN KEY (chat_id) REFERENCES chats (id)
+       )
+   ''')
+   
+   conn.commit()
+   conn.close()
 
 init_db()
 print("Chat-specific MCP processor initialized successfully!")
 
 # Install dependencies if not available
 try:
-    from bs4 import BeautifulSoup
+   from bs4 import BeautifulSoup
 except ImportError:
-    print("Note: BeautifulSoup not available. Install with: pip install beautifulsoup4 lxml")
+   print("Note: BeautifulSoup not available. Install with: pip install beautifulsoup4 lxml")
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+   return render_template('index.html')
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """Handle file upload for specific chat"""
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'error': 'No file selected'})
-    
-    file = request.files['file']
-    chat_id = request.form.get('chat_id')
-    
-    if file.filename == '':
-        return jsonify({'success': False, 'error': 'No file selected'})
-    
-    if not chat_id:
-        return jsonify({'success': False, 'error': 'Chat ID required'})
-    
-    # Validate file type
-    allowed_extensions = {'.csv', '.xlsx', '.xls'}
-    file_ext = Path(file.filename).suffix.lower()
-    
-    if file_ext not in allowed_extensions:
-        return jsonify({'success': False, 'error': 'Only CSV and Excel files are supported'})
-    
-    try:
-        filename = secure_filename(file.filename)
-        # Make filename unique per chat
-        unique_filename = f"{chat_id}_{filename}"
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-        
-        print(f"Saving file to: {file_path}")
-        file.save(file_path)
-        
-        if os.path.exists(file_path):
-            print(f"File saved successfully for chat {chat_id}")
-        else:
-            return jsonify({'success': False, 'error': 'File save failed'})
-        
-        # Process through chat-specific processor
-        success = chat_processor.load_dataset_for_chat(file_path, chat_id)
-        
-        if success:
-            return jsonify({'success': True, 'message': 'Dataset loaded successfully for this chat!'})
-        else:
-            return jsonify({'success': False, 'error': 'Failed to process dataset'})
-            
-    except Exception as e:
-        print(f"Upload error: {e}")
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': f'Upload failed: {str(e)}'})
+   """Handle file upload for specific chat"""
+   if 'file' not in request.files:
+       return jsonify({'success': False, 'error': 'No file selected'})
+   
+   file = request.files['file']
+   chat_id = request.form.get('chat_id')
+   
+   if file.filename == '':
+       return jsonify({'success': False, 'error': 'No file selected'})
+   
+   if not chat_id:
+       return jsonify({'success': False, 'error': 'Chat ID required'})
+   
+   # Validate file type
+   allowed_extensions = {'.csv', '.xlsx', '.xls'}
+   file_ext = Path(file.filename).suffix.lower()
+   
+   if file_ext not in allowed_extensions:
+       return jsonify({'success': False, 'error': 'Only CSV and Excel files are supported'})
+   
+   try:
+       filename = secure_filename(file.filename)
+       # Make filename unique per chat
+       unique_filename = f"{chat_id}_{filename}"
+       file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+       
+       print(f"Saving file to: {file_path}")
+       file.save(file_path)
+       
+       if os.path.exists(file_path):
+           print(f"File saved successfully for chat {chat_id}")
+       else:
+           return jsonify({'success': False, 'error': 'File save failed'})
+       
+       # Process through chat-specific processor
+       success = chat_processor.load_dataset_for_chat(file_path, chat_id)
+       
+       if success:
+           return jsonify({'success': True, 'message': 'Dataset loaded successfully for this chat!'})
+       else:
+           return jsonify({'success': False, 'error': 'Failed to process dataset'})
+           
+   except Exception as e:
+       print(f"Upload error: {e}")
+       traceback.print_exc()
+       return jsonify({'success': False, 'error': f'Upload failed: {str(e)}'})
 
 @app.route('/status')
 def get_status():
-    """Get overall status - now chat-agnostic"""
-    return jsonify({
-        'stage': 'waiting',
-        'progress': 0,
-        'message': 'Upload data to a specific chat to begin analysis'
-    })
+   """Get overall status - now chat-agnostic"""
+   return jsonify({
+       'stage': 'waiting',
+       'progress': 0,
+       'message': 'Upload data to a specific chat to begin analysis'
+   })
 
 @app.route('/chat/<chat_id>/status')
 def get_chat_status(chat_id):
-    """Get dataset status for specific chat"""
-    if chat_processor.has_dataset_for_chat(chat_id):
-        dataset_info = chat_processor.get_chat_dataset_info(chat_id)
-        return jsonify({
-            'stage': 'complete',
-            'progress': 100,
-            'dataset_info': {
-                'shape': {'rows': dataset_info['total_rows'], 'columns': dataset_info['total_columns']},
-                'columns': dataset_info['columns'],
-                'file_size_mb': dataset_info['file_size_mb'],
-                'file_size_formatted': dataset_info['file_size_formatted'],
-                'file_size_bytes': dataset_info['file_size_bytes'],
-                'file_name': dataset_info.get('file_name', 'Unknown'),
-                'file_path': dataset_info.get('file_path', '')
-            },
-            'insights': [
-                f"✅ Dataset loaded: {dataset_info['total_rows']:,} rows × {dataset_info['total_columns']} columns",
-                f"📊 File size: {dataset_info['file_size_formatted']}",
-                f"🗃️ SQLite database created for efficient querying",
-                f"🤖 Ready for natural language analysis",
-                f"⚡ Handles any dataset size and width"
-            ]
-        })
-    else:
-        return jsonify({
-            'stage': 'waiting',
-            'progress': 0,
-            'message': 'No dataset loaded for this chat'
-        })
+   """Get dataset status for specific chat"""
+   if chat_processor.has_dataset_for_chat(chat_id):
+       dataset_info = chat_processor.get_chat_dataset_info(chat_id)
+       return jsonify({
+           'stage': 'complete',
+           'progress': 100,
+           'dataset_info': {
+               'shape': {'rows': dataset_info['total_rows'], 'columns': dataset_info['total_columns']},
+               'columns': dataset_info['columns'],
+               'file_size_mb': dataset_info['file_size_mb'],
+               'file_size_formatted': dataset_info['file_size_formatted'],
+               'file_size_bytes': dataset_info['file_size_bytes'],
+               'file_name': dataset_info.get('file_name', 'Unknown'),
+               'file_path': dataset_info.get('file_path', '')
+           },
+           'insights': [
+               f"✅ Dataset loaded: {dataset_info['total_rows']:,} rows × {dataset_info['total_columns']} columns",
+               f"📊 File size: {dataset_info['file_size_formatted']}",
+               f"🗃️ SQLite database created for efficient querying",
+               f"🤖 Ready for natural language analysis",
+               f"⚡ Handles any dataset size and width"
+           ]
+       })
+   else:
+       return jsonify({
+           'stage': 'waiting',
+           'progress': 0,
+           'message': 'No dataset loaded for this chat'
+       })
 
 @app.route('/chat/new', methods=['POST'])
 def create_new_chat():
-    """Create new chat session"""
-    chat_id = str(uuid.uuid4())
-    timestamp = datetime.now()
-    
-    conn = sqlite3.connect('data/chat_history.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        INSERT INTO chats (id, title, created_at, updated_at)
-        VALUES (?, ?, ?, ?)
-    ''', (chat_id, 'New Analysis', timestamp, timestamp))
-    
-    conn.commit()
-    conn.close()
-    
-    return jsonify({'success': True, 'chat_id': chat_id})
+   """Create new chat session"""
+   chat_id = str(uuid.uuid4())
+   timestamp = datetime.now()
+   
+   conn = sqlite3.connect('data/chat_history.db')
+   cursor = conn.cursor()
+   
+   cursor.execute('''
+       INSERT INTO chats (id, title, created_at, updated_at)
+       VALUES (?, ?, ?, ?)
+   ''', (chat_id, 'New Analysis', timestamp, timestamp))
+   
+   conn.commit()
+   conn.close()
+   
+   return jsonify({'success': True, 'chat_id': chat_id})
 
 @app.route('/chat/<chat_id>/dataset-status')
 def get_chat_dataset_status(chat_id):
-    """Check if there's an active dataset for this specific chat"""
-    try:
-        if chat_processor.load_chat_dataset(chat_id):
-            dataset_info = chat_processor.get_chat_dataset_info(chat_id)
-            return jsonify({
-                'has_dataset': True,
-                'dataset_info': {
-                    'shape': {
-                        'rows': dataset_info['total_rows'], 
-                        'columns': dataset_info['total_columns']
-                    },
-                    'columns': dataset_info['columns'],
-                    'file_size_formatted': dataset_info.get('file_size_formatted', '0 B'),
-                    'file_name': dataset_info.get('file_name', 'Unknown')
-                }
-            })
-        
-        return jsonify({'has_dataset': False})
-        
-    except Exception as e:
-        print(f"Error checking dataset status for chat {chat_id}: {e}")
-        return jsonify({'has_dataset': False})
+   """Check if there's an active dataset for this specific chat"""
+   try:
+       if chat_processor.load_chat_dataset(chat_id):
+           dataset_info = chat_processor.get_chat_dataset_info(chat_id)
+           return jsonify({
+               'has_dataset': True,
+               'dataset_info': {
+                   'shape': {
+                       'rows': dataset_info['total_rows'], 
+                       'columns': dataset_info['total_columns']
+                   },
+                   'columns': dataset_info['columns'],
+                   'file_size_formatted': dataset_info.get('file_size_formatted', '0 B'),
+                   'file_name': dataset_info.get('file_name', 'Unknown')
+               }
+           })
+       
+       return jsonify({'has_dataset': False})
+       
+   except Exception as e:
+       print(f"Error checking dataset status for chat {chat_id}: {e}")
+       return jsonify({'has_dataset': False})
 
 @app.route('/chat/<chat_id>/delete', methods=['DELETE'])
 def delete_chat(chat_id):
-    """Delete a specific chat and its associated dataset"""
-    try:
-        conn = sqlite3.connect('data/chat_history.db')
-        cursor = conn.cursor()
-        
-        # Get dataset files before deletion
-        cursor.execute('SELECT file_path, sqlite_path FROM chat_datasets WHERE chat_id = ?', (chat_id,))
-        dataset_row = cursor.fetchone()
-        
-        # Delete from all tables
-        cursor.execute('DELETE FROM messages WHERE chat_id = ?', (chat_id,))
-        cursor.execute('DELETE FROM chat_datasets WHERE chat_id = ?', (chat_id,))
-        cursor.execute('DELETE FROM chats WHERE id = ?', (chat_id,))
-        
-        conn.commit()
-        conn.close()
-        
-        # Clean up files
-        if dataset_row:
-            file_path, sqlite_path = dataset_row
-            try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                if os.path.exists(sqlite_path):
-                    os.remove(sqlite_path)
-            except Exception as e:
-                print(f"Error cleaning up files: {e}")
-        
-        # Remove from memory
-        if chat_id in chat_processor.chat_datasets:
-            del chat_processor.chat_datasets[chat_id]
-        
-        return jsonify({'success': True})
-        
-    except Exception as e:
-        print(f"Error deleting chat: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+   """Delete a specific chat and its associated dataset"""
+   try:
+       conn = sqlite3.connect('data/chat_history.db')
+       cursor = conn.cursor()
+       
+       # Get dataset files before deletion
+       cursor.execute('SELECT file_path, sqlite_path FROM chat_datasets WHERE chat_id = ?', (chat_id,))
+       dataset_row = cursor.fetchone()
+       
+       # Delete from all tables
+       cursor.execute('DELETE FROM messages WHERE chat_id = ?', (chat_id,))
+       cursor.execute('DELETE FROM chat_datasets WHERE chat_id = ?', (chat_id,))
+       cursor.execute('DELETE FROM chats WHERE id = ?', (chat_id,))
+       
+       conn.commit()
+       conn.close()
+       
+       # Clean up files
+       if dataset_row:
+           file_path, sqlite_path = dataset_row
+           try:
+               if os.path.exists(file_path):
+                   os.remove(file_path)
+               if os.path.exists(sqlite_path):
+                   os.remove(sqlite_path)
+           except Exception as e:
+               print(f"Error cleaning up files: {e}")
+       
+       # Remove from memory
+       if chat_id in chat_processor.chat_datasets:
+           del chat_processor.chat_datasets[chat_id]
+       
+       return jsonify({'success': True})
+       
+   except Exception as e:
+       print(f"Error deleting chat: {e}")
+       return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/chat/<chat_id>/rename', methods=['PUT'])
 def rename_chat(chat_id):
-    """Rename a specific chat"""
-    try:
-        data = request.get_json()
-        new_title = data.get('title', '').strip()
-        
-        if not new_title:
-            return jsonify({'success': False, 'error': 'Title is required'})
-        
-        if len(new_title) > 100:
-            return jsonify({'success': False, 'error': 'Title is too long'})
-        
-        conn = sqlite3.connect('data/chat_history.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            UPDATE chats SET title = ?, updated_at = ?
-            WHERE id = ?
-        ''', (new_title, datetime.now(), chat_id))
-        
-        if cursor.rowcount == 0:
-            conn.close()
-            return jsonify({'success': False, 'error': 'Chat not found'})
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'success': True, 'message': 'Chat renamed successfully'})
-        
-    except Exception as e:
-        print(f"Error renaming chat: {e}")
-        return jsonify({'success': False, 'error': str(e)})
+   """Rename a specific chat"""
+   try:
+       data = request.get_json()
+       new_title = data.get('title', '').strip()
+       
+       if not new_title:
+           return jsonify({'success': False, 'error': 'Title is required'})
+       
+       if len(new_title) > 100:
+           return jsonify({'success': False, 'error': 'Title is too long'})
+       
+       conn = sqlite3.connect('data/chat_history.db')
+       cursor = conn.cursor()
+       
+       cursor.execute('''
+           UPDATE chats SET title = ?, updated_at = ?
+           WHERE id = ?
+       ''', (new_title, datetime.now(), chat_id))
+       
+       if cursor.rowcount == 0:
+           conn.close()
+           return jsonify({'success': False, 'error': 'Chat not found'})
+       
+       conn.commit()
+       conn.close()
+       
+       return jsonify({'success': True, 'message': 'Chat renamed successfully'})
+       
+   except Exception as e:
+       print(f"Error renaming chat: {e}")
+       return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/similarity-analysis', methods=['POST'])
+def analyze_similarity():
+   """Analyze similarity patterns in chat dataset"""
+   try:
+       data = request.get_json()
+       chat_id = data.get('chat_id')
+       analysis_type = data.get('analysis_type', 'comprehensive')
+       threshold = data.get('threshold', 0.7)
+       search_query = data.get('search_query', '')
+       categories = data.get('categories', [])
+       
+       if not chat_id:
+           return jsonify({'success': False, 'error': 'Chat ID required'})
+       
+       # Check if chat has dataset
+       if not chat_processor.has_dataset_for_chat(chat_id):
+           return jsonify({'success': False, 'error': 'No dataset loaded for this chat'})
+       
+       dataset_info = chat_processor.get_chat_dataset_info(chat_id)
+       
+       # Perform similarity analysis
+       result = similarity_analyzer.analyze_dataset_similarity(
+           dataset_info, chat_id, analysis_type, threshold, search_query, categories
+       )
+       
+       return jsonify(result)
+       
+   except Exception as e:
+       print(f"Similarity analysis error: {e}")
+       traceback.print_exc()
+       return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/query', methods=['POST'])
 def process_query():
-    """Process user query for specific chat"""
-    data = request.get_json()
-    question = data.get('question', '').strip()
-    chat_id = data.get('chat_id')
-    
-    if not question:
-        return jsonify({'success': False, 'error': 'Please provide a question'})
-    
-    if not chat_id:
-        return jsonify({'success': False, 'error': 'Chat ID required'})
-    
-    # Load chat dataset if not in memory
-    if not chat_processor.load_chat_dataset(chat_id):
-        return jsonify({'success': False, 'error': 'No dataset loaded for this chat. Please upload a dataset first.'})
-    
-    print(f"Processing query for chat {chat_id}: {question}")
-    
-    # Process through chat-specific MCP
-    result = chat_processor.query_data_for_chat(question, chat_id)
-    
-    # Save to chat history if successful
-    if result.get('success') and chat_id:
-        try:
-            conn = sqlite3.connect('data/chat_history.db')
-            cursor = conn.cursor()
-            
-            # Save user message
-            cursor.execute('''
-                INSERT INTO messages (chat_id, type, content, timestamp)
-                VALUES (?, ?, ?, ?)
-            ''', (chat_id, 'user', question, datetime.now()))
-            
-            # Save assistant response
-            result_json = safe_json_dumps(result.get('results', []))
-            cursor.execute('''
-                INSERT INTO messages (chat_id, type, content, query, result, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (chat_id, 'assistant', result['answer'], 
-                  result.get('sql_query'), result_json, datetime.now()))
-            
-            # Update chat title if it's the first real question
-            cursor.execute('''
-                UPDATE chats SET title = ?, updated_at = ?
-                WHERE id = ? AND title = 'New Analysis'
-            ''', (question[:50] + ('...' if len(question) > 50 else ''), datetime.now(), chat_id))
-            
-            conn.commit()
-            conn.close()
-            
-        except Exception as e:
-            print(f"Error saving to chat history: {e}")
-    
-    return jsonify(result)
+   """Process user query for specific chat"""
+   data = request.get_json()
+   question = data.get('question', '').strip()
+   chat_id = data.get('chat_id')
+   
+   if not question:
+       return jsonify({'success': False, 'error': 'Please provide a question'})
+   
+   if not chat_id:
+       return jsonify({'success': False, 'error': 'Chat ID required'})
+   
+   # Load chat dataset if not in memory
+   if not chat_processor.load_chat_dataset(chat_id):
+       return jsonify({'success': False, 'error': 'No dataset loaded for this chat. Please upload a dataset first.'})
+   
+   print(f"Processing query for chat {chat_id}: {question}")
+   
+   # Process through chat-specific MCP
+   result = chat_processor.query_data_for_chat(question, chat_id)
+   
+   # Save to chat history if successful
+   if result.get('success') and chat_id:
+       try:
+           conn = sqlite3.connect('data/chat_history.db')
+           cursor = conn.cursor()
+           
+           # Save user message
+           cursor.execute('''
+               INSERT INTO messages (chat_id, type, content, timestamp)
+               VALUES (?, ?, ?, ?)
+           ''', (chat_id, 'user', question, datetime.now()))
+           
+           # Save assistant response
+           result_json = safe_json_dumps(result.get('results', []))
+           cursor.execute('''
+               INSERT INTO messages (chat_id, type, content, query, result, timestamp)
+               VALUES (?, ?, ?, ?, ?, ?)
+           ''', (chat_id, 'assistant', result['answer'], 
+                 result.get('sql_query'), result_json, datetime.now()))
+           
+           # Update chat title if it's the first real question
+           cursor.execute('''
+               UPDATE chats SET title = ?, updated_at = ?
+               WHERE id = ? AND title = 'New Analysis'
+           ''', (question[:50] + ('...' if len(question) > 50 else ''), datetime.now(), chat_id))
+           
+           conn.commit()
+           conn.close()
+           
+       except Exception as e:
+           print(f"Error saving to chat history: {e}")
+   
+   return jsonify(result)
 
 @app.route('/chat/history')
 def get_chat_history():
-    """Get chat history"""
-    try:
-        conn = sqlite3.connect('data/chat_history.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT c.id, c.title, c.created_at, c.updated_at,
-                   m.type, m.content, m.timestamp
-            FROM chats c
-            LEFT JOIN messages m ON c.id = m.chat_id
-            ORDER BY c.updated_at DESC, m.timestamp ASC
-        ''')
-        
-        rows = cursor.fetchall()
-        conn.close()
-        
-        chats = {}
-        for row in rows:
-            chat_id = row[0]
-            if chat_id not in chats:
-                chats[chat_id] = {
-                    'id': chat_id,
-                    'title': row[1],
-                    'created_at': row[2],
-                    'updated_at': row[3],
-                    'messages': []
-                }
-            
-            if row[4]:  # If message exists
-                chats[chat_id]['messages'].append({
-                    'type': row[4],
-                    'content': row[5],
-                    'timestamp': row[6]
-                })
-        
-        return jsonify({'chats': list(chats.values())})
-        
-    except Exception as e:
-        print(f"Error getting chat history: {e}")
-        return jsonify({'chats': []})
+   """Get chat history"""
+   try:
+       conn = sqlite3.connect('data/chat_history.db')
+       cursor = conn.cursor()
+       
+       cursor.execute('''
+           SELECT c.id, c.title, c.created_at, c.updated_at,
+                  m.type, m.content, m.timestamp
+           FROM chats c
+           LEFT JOIN messages m ON c.id = m.chat_id
+           ORDER BY c.updated_at DESC, m.timestamp ASC
+       ''')
+       
+       rows = cursor.fetchall()
+       conn.close()
+       
+       chats = {}
+       for row in rows:
+           chat_id = row[0]
+           if chat_id not in chats:
+               chats[chat_id] = {
+                   'id': chat_id,
+                   'title': row[1],
+                   'created_at': row[2],
+                   'updated_at': row[3],
+                   'messages': []
+               }
+           
+           if row[4]:  # If message exists
+               chats[chat_id]['messages'].append({
+                   'type': row[4],
+                   'content': row[5],
+                   'timestamp': row[6]
+               })
+       
+       return jsonify({'chats': list(chats.values())})
+       
+   except Exception as e:
+       print(f"Error getting chat history: {e}")
+       return jsonify({'chats': []})
 
 @app.route('/chat/<chat_id>')
 def get_chat(chat_id):
-    """Get specific chat"""
-    try:
-        conn = sqlite3.connect('data/chat_history.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT c.id, c.title, c.created_at, c.updated_at
-            FROM chats c
-            WHERE c.id = ?
-        ''', (chat_id,))
-        
-        chat_row = cursor.fetchone()
-        if not chat_row:
-            return jsonify({'error': 'Chat not found'}), 404
-        
-        cursor.execute('''
-            SELECT type, content, query, result, timestamp
-            FROM messages
-            WHERE chat_id = ?
-            ORDER BY timestamp ASC
-        ''', (chat_id,))
-        
-        message_rows = cursor.fetchall()
-        conn.close()
-        
-        chat = {
-            'id': chat_row[0],
-            'title': chat_row[1],
-            'created_at': chat_row[2],
-            'updated_at': chat_row[3],
-            'messages': []
-        }
-        
-        for row in message_rows:
-            message = {
-                'type': row[0],
-                'content': row[1],
-                'query': row[2],
-                'timestamp': row[4]
-            }
-            
-            if row[3]:
-                try:
-                    message['result'] = json.loads(row[3])
-                except:
-                    message['result'] = None
-            else:
-                message['result'] = None
-                
-            chat['messages'].append(message)
-        
-        return jsonify({'chat': chat})
-        
-    except Exception as e:
-        print(f"Error getting chat: {e}")
-        return jsonify({'error': 'Failed to load chat'}), 500
+   """Get specific chat"""
+   try:
+       conn = sqlite3.connect('data/chat_history.db')
+       cursor = conn.cursor()
+       
+       cursor.execute('''
+           SELECT c.id, c.title, c.created_at, c.updated_at
+           FROM chats c
+           WHERE c.id = ?
+       ''', (chat_id,))
+       
+       chat_row = cursor.fetchone()
+       if not chat_row:
+           return jsonify({'error': 'Chat not found'}), 404
+       
+       cursor.execute('''
+           SELECT type, content, query, result, timestamp
+           FROM messages
+           WHERE chat_id = ?
+           ORDER BY timestamp ASC
+       ''', (chat_id,))
+       
+       message_rows = cursor.fetchall()
+       conn.close()
+       
+       chat = {
+           'id': chat_row[0],
+           'title': chat_row[1],
+           'created_at': chat_row[2],
+           'updated_at': chat_row[3],
+           'messages': []
+       }
+       
+       for row in message_rows:
+           message = {
+               'type': row[0],
+               'content': row[1],
+               'query': row[2],
+               'timestamp': row[4]
+           }
+           
+           if row[3]:
+               try:
+                   message['result'] = json.loads(row[3])
+               except:
+                   message['result'] = None
+           else:
+               message['result'] = None
+               
+           chat['messages'].append(message)
+       
+       return jsonify({'chat': chat})
+       
+   except Exception as e:
+       print(f"Error getting chat: {e}")
+       return jsonify({'error': 'Failed to load chat'}), 500
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 8080))
-    debug = os.getenv('DEBUG', 'True').lower() == 'true'
-    host = os.getenv('HOST', '0.0.0.0')
-    
-    print(f"🚀 Starting Chat-specific MCP AI Sheet Chat on {host}:{port}")
-    app.run(debug=debug, host=host, port=port)
+   port = int(os.getenv('PORT', 8080))
+   debug = os.getenv('DEBUG', 'True').lower() == 'true'
+   host = os.getenv('HOST', '0.0.0.0')
+   
+   print(f"🚀 Starting Chat-specific MCP AI Sheet Chat on {host}:{port}")
+   app.run(debug=debug, host=host, port=port)

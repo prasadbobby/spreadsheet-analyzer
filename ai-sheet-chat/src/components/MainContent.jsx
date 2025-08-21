@@ -33,12 +33,13 @@ import {
 import { useAISheetChat } from "@/contexts/AISheetChatContext";
 import { formatMessageText, getCurrentTime } from "@/lib/utils";
 import WelcomeScreen from "@/components/WelcomeScreen";
-import DataTable from "@/components/DataTable";
+// import VirtualizedDataTable from "@/components/VirtualizedDataTable";
+import OptimizedDataTable from "./OptimizedDataTable";
 import ChartVisualization from "@/components/ChartVisualization";
 import ClearSessionDialog from "@/components/ClearSessionDialog";
 
 // Memoized components to prevent unnecessary re-renders
-const MemoizedDataTable = React.memo(DataTable);
+const MemoizedDataTable = React.memo(OptimizedDataTable);
 const MemoizedChartVisualization = React.memo(ChartVisualization);
 
 export default function MainContent() {
@@ -182,8 +183,8 @@ export default function MainContent() {
       },
       {
         icon: Search,
-        label: "Find Insights",
-        message: "What are the most interesting insights in this data?",
+        label: "Find Similar",
+        message: "Find similar records and duplicates in this data",
         color:
           "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
       },
@@ -467,7 +468,7 @@ export default function MainContent() {
                 <div className="text-center">
                   <p className="text-xs text-gray-500">
                     💡 Try: &quot;Create a bar chart&quot;, &quot;Show sales by
-                    department&quot;, &quot;Find unusual patterns&quot;, or
+                    department&quot;, &quot;Find similar records&quot;, or
                     &quot;Summarize key insights&quot;
                   </p>
                 </div>
