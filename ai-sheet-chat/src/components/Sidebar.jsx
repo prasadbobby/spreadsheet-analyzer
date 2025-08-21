@@ -17,83 +17,18 @@ import {
   AlertCircle,
   CheckCircle,
   MessageSquare,
-  Sparkles,
-  TrendingUp,
   Clock,
   PieChart,
   Activity,
   Edit2,
-  MoreVertical,
-  GitMerge
+  MoreVertical
 } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
 import { useAISheetChat } from '@/contexts/AISheetChatContext'
 import { formatTime } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import DeleteChatDialog from '@/components/DeleteChatDialog'
-import AIInsightsModal from '@/components/AIInsightsModal'
 import RenameChatDialog from '@/components/RenameChatDialog'
-
-// Custom Dropdown Component
-const CustomDropdown = ({ children, trigger, isOpen, onOpenChange, align = 'right' }) => {
-  const dropdownRef = useRef(null)
-
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        onOpenChange(false)
-      }
-    }
-
-    const handleEscape = (event) => {
-      if (event.key === 'Escape') {
-        onOpenChange(false)
-      }
-    }
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-      document.addEventListener('keydown', handleEscape)
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside)
-        document.removeEventListener('keydown', handleEscape)
-      }
-    }
-  }, [isOpen, onOpenChange])
-
-  return (
-    <div className="relative" ref={dropdownRef}>
-      {trigger}
-      {isOpen && (
-        <div 
-          className={cn(
-            "absolute top-full mt-1 min-w-[140px] bg-white rounded-md shadow-lg border border-gray-200 py-1 z-[9999]",
-            "animate-in fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2",
-            align === 'right' ? 'right-0' : 'left-0'
-          )}
-          style={{ zIndex: 9999 }}
-        >
-          {children}
-        </div>
-      )}
-    </div>
-  )
-}
-
-const DropdownItem = ({ children, onClick, className = '', variant = 'default' }) => {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center gap-2 transition-colors focus:bg-gray-100 focus:outline-none",
-        variant === 'destructive' && "text-red-600 hover:bg-red-50 focus:bg-red-50",
-        className
-      )}
-    >
-      {children}
-    </button>
-  )
-}
 
 export default function Sidebar() {
   const {
@@ -101,7 +36,6 @@ export default function Sidebar() {
     datasetLoaded,
     chats,
     datasetInfo,
-    insights,
     progress,
     isUploading,
     uploadError,
@@ -109,14 +43,12 @@ export default function Sidebar() {
     switchToChat,
     deleteChat,
     renameChat,
-    uploadFile,
-    sendMessage
+    uploadFile
   } = useAISheetChat()
 
   // Dialog states
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [chatToDelete, setChatToDelete] = useState(null)
-  const [insightsModalOpen, setInsightsModalOpen] = useState(false)
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
   const [chatToRename, setChatToRename] = useState(null)
   const [openDropdownId, setOpenDropdownId] = useState(null)
@@ -143,7 +75,7 @@ export default function Sidebar() {
   })
 
   // Dropdown handlers
-  const handleDropdownToggle = (chatId, event) => {
+  const toggleDropdown = (chatId, event) => {
     event.preventDefault()
     event.stopPropagation()
     setOpenDropdownId(openDropdownId === chatId ? null : chatId)
@@ -204,14 +136,6 @@ export default function Sidebar() {
     setRenameDialogOpen(false)
   }
 
-  // FIXED: Similarity analysis through chat instead of tabs
-  const handleSimilarityAnalysis = useCallback(() => {
-    if (datasetLoaded && currentChatId) {
-      const analysisMessage = "Perform comprehensive similarity analysis on this dataset. Find duplicates, near-duplicates, and semantically similar records. Include exact matches, similarity scores, and pattern recognition. Show detailed analysis with groupings and recommendations."
-      sendMessage(analysisMessage)
-    }
-  }, [datasetLoaded, currentChatId, sendMessage])
-
   // File upload handler
   const handleFileInputChange = (e) => {
     const file = e.target.files?.[0]
@@ -242,9 +166,32 @@ export default function Sidebar() {
     ]
   }
 
+  // Utility function for truncating text
+  const truncateText = (text, maxLength) => {
+    if (text.length <= maxLength) return text
+    return text.substring(0, maxLength) + '...'
+  }
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      closeDropdown()
+    }
+
+    if (openDropdownId) {
+      setTimeout(() => {
+        document.addEventListener('click', handleClickOutside)
+      }, 100)
+      
+      return () => {
+        document.removeEventListener('click', handleClickOutside)
+      }
+    }
+  }, [openDropdownId])
+
   return (
     <>
-      <div className="w-80 bg-card border-r border-border flex flex-col h-full shadow-sm">
+      <div className="w-80 bg-card border-r border-border flex flex-col h-full shadow-sm relative">
         {/* Header - Fixed Height to Match Navbar */}
         <div className="h-[120px] flex flex-col justify-center p-6" style={{ backgroundColor: '#8500df', color: 'white' }}>
           <div className="flex items-center gap-3 mb-4">
@@ -371,53 +318,8 @@ export default function Sidebar() {
           )}
         </div>
 
-        {/* Navigation Links */}
-        <div className="px-6 py-4 border-b border-border">
-          <div className="space-y-2">
-            {insights.length > 0 && (
-              <Button
-                variant="ghost"
-                className="w-full justify-start p-3 h-auto hover:bg-primary/10"
-                onClick={() => setInsightsModalOpen(true)}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
-                    <Sparkles className="h-4 w-4 text-purple-600" />
-                  </div>
-                  <div className="text-left">
-                    <div className="text-sm font-medium text-gray-900">AI Insights</div>
-                    <div className="text-xs text-gray-500">{insights.length} insights available</div>
-                  </div>
-                  <Badge variant="secondary" className="ml-auto bg-purple-100 text-purple-800">
-                    {insights.length}
-                  </Badge>
-                </div>
-              </Button>
-            )}
-
-            {/* FIXED: Similarity Analysis Button */}
-            {datasetLoaded && currentChatId && (
-              <Button
-                variant="ghost"
-                className="w-full justify-start p-3 h-auto hover:bg-primary/10"
-                onClick={handleSimilarityAnalysis}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center">
-                    <GitMerge className="h-4 w-4 text-orange-600" />
-                  </div>
-                  <div className="text-left">
-                    <div className="text-sm font-medium text-gray-900">Similarity Analysis</div>
-                    <div className="text-xs text-gray-500">Find duplicates & patterns</div>
-                  </div>
-                </div>
-              </Button>
-            )}
-          </div>
-        </div>
-
-        {/* Chat History - Fixed Scrolling */}
-        <div className="flex-1 flex flex-col min-h-0">
+        {/* Chat History - WORKING TRUNCATION + VISIBLE 3-DOTS */}
+        <div className="flex-1 flex flex-col min-h-0 relative">
           <div className="p-6 pb-4 flex-shrink-0">
             <div className="flex items-center gap-2">
               <MessageSquare className="h-4 w-4 text-gray-600" />
@@ -427,8 +329,8 @@ export default function Sidebar() {
           </div>
           
           {/* Scrollable Chat List */}
-          <div className="flex-1 min-h-0 px-6">
-            <ScrollArea className="h-full custom-scrollbar">
+          <div className="flex-1 min-h-0 px-6 relative">
+            <ScrollArea className="h-full">
               <div className="space-y-2 pb-6">
                 {chats.length === 0 ? (
                   <div className="text-center py-8">
@@ -445,82 +347,141 @@ export default function Sidebar() {
                       ? (lastMessage.type === 'user' ? lastMessage.content : 'AI Analysis')
                       : 'New Session'
                     
+                    // MANUAL TRUNCATION - GUARANTEED TO WORK
+                    const truncatedTitle = truncateText(chat.title, 25)
+                    const truncatedPreview = truncateText(preview, 35)
+                    
                     return (
                       <div
                         key={chat.id}
                         className={cn(
-                          "group relative p-3 rounded-lg cursor-pointer transition-all border",
+                          "relative rounded-lg border transition-all",
                           "hover:shadow-md hover:bg-gray-50",
                           chat.id === currentChatId 
                             ? "bg-purple-50 border-purple-200 shadow-sm" 
                             : "bg-white border-gray-100 hover:border-gray-200"
                         )}
-                        onClick={() => switchToChat(chat.id)}
                       >
-                        <div className="pr-10">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className={cn(
-                              "w-2 h-2 rounded-full",
-                              chat.id === currentChatId ? "bg-purple-500" : "bg-gray-300"
-                            )} />
-                            <div className="font-medium text-sm text-gray-900 truncate flex-1">
-                              {chat.title}
-                            </div>
-                          </div>
-                          
-                          <div className="text-xs text-gray-500 mb-2 line-clamp-2">
-                            {preview.substring(0, 50)}{preview.length > 50 ? '...' : ''}
-                          </div>
-                          
-                          <div className="flex items-center justify-between text-xs text-gray-400">
-                            <div className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              {formatTime(chat.updated_at)}
-                            </div>
-                            {chat.messages && chat.messages.length > 0 && (
-                              <div className="flex items-center gap-1">
-                                <MessageSquare className="h-3 w-3" />
-                                <span>{chat.messages.length}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        
-                        {/* Custom Dropdown Menu */}
-                        <div className="absolute top-2 right-2">
-                          <CustomDropdown
-                            isOpen={openDropdownId === chat.id}
-                            onOpenChange={(isOpen) => setOpenDropdownId(isOpen ? chat.id : null)}
-                            trigger={
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className={cn(
-                                  "h-6 w-6 p-0 hover:bg-gray-200/80 transition-all duration-200",
-                                  "opacity-0 group-hover:opacity-100",
-                                  chat.id === currentChatId && "opacity-100",
-                                  openDropdownId === chat.id && "opacity-100 bg-gray-200"
-                                )}
-                                onClick={(e) => handleDropdownToggle(chat.id, e)}
-                              >
-                                <MoreVertical className="h-3 w-3" />
-                              </Button>
-                            }
+                        {/* GRID LAYOUT - FIXED PROPORTIONS */}
+                        <div className="p-3">
+                          <div 
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: '1fr 32px', // Content takes remaining space, 32px for button
+                              gap: '8px',
+                              alignItems: 'start'
+                            }}
                           >
-                            <DropdownItem 
-                              onClick={(e) => handleRenameClick(chat, e)}
+                            {/* LEFT COLUMN: Chat Content */}
+                            <div 
+                              className="cursor-pointer overflow-hidden"
+                              onClick={() => switchToChat(chat.id)}
+                              style={{ minWidth: 0 }} // Critical for truncation
                             >
-                              <Edit2 className="h-3 w-3" />
-                              Rename
-                            </DropdownItem>
-                            <DropdownItem 
-                              onClick={(e) => handleDeleteClick(chat, e)}
-                              variant="destructive"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                              Delete
-                            </DropdownItem>
-                          </CustomDropdown>
+                              {/* Title with indicator */}
+                              <div className="flex items-center gap-2 mb-2">
+                                <div className={cn(
+                                  "w-2 h-2 rounded-full flex-shrink-0",
+                                  chat.id === currentChatId ? "bg-purple-500" : "bg-gray-300"
+                                )} />
+                                <div 
+                                  className="font-medium text-sm text-gray-900"
+                                  style={{
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                  title={chat.title} // Show full title on hover
+                                >
+                                  {truncatedTitle}
+                                </div>
+                              </div>
+                              
+                              {/* Preview text */}
+                              <div 
+                                className="text-xs text-gray-500 mb-2"
+                                style={{
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap'
+                                }}
+                                title={preview} // Show full preview on hover
+                              >
+                                {truncatedPreview}
+                              </div>
+                              
+                              {/* Bottom metadata */}
+                              <div className="flex items-center justify-between text-xs text-gray-400">
+                                <div 
+                                  className="flex items-center gap-1"
+                                  style={{ minWidth: 0 }}
+                                >
+                                  <Clock className="h-3 w-3 flex-shrink-0" />
+                                  <span 
+                                    style={{
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap'
+                                    }}
+                                  >
+                                    {formatTime(chat.updated_at)}
+                                  </span>
+                                </div>
+                                {chat.messages && chat.messages.length > 0 && (
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    <MessageSquare className="h-3 w-3" />
+                                    <span>{chat.messages.length}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            
+                            {/* RIGHT COLUMN: 3-Dots Button */}
+                            <div className="relative flex justify-center">
+                              <button
+                                onClick={(e) => toggleDropdown(chat.id, e)}
+                                className={cn(
+                                  "w-8 h-8 rounded-md flex items-center justify-center",
+                                  "text-gray-500 hover:text-gray-700 hover:bg-gray-200",
+                                  "transition-colors duration-200",
+                                  openDropdownId === chat.id && "bg-gray-200 text-gray-700"
+                                )}
+                                title="More options"
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </button>
+                              
+                              {/* DROPDOWN MENU */}
+                              {openDropdownId === chat.id && (
+                                <div 
+                                  className="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-2 min-w-[140px]"
+                                  onClick={(e) => e.stopPropagation()}
+                                  style={{
+                                    zIndex: 9999,
+                                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)'
+                                  }}
+                                >
+                                  {/* Rename Option */}
+                                  <button
+                                    onClick={(e) => handleRenameClick(chat, e)}
+                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-3 transition-colors"
+                                  >
+                                    <Edit2 className="h-4 w-4 text-blue-500" />
+                                    <span>Rename</span>
+                                  </button>
+                                  
+                                  {/* Delete Option */}
+                                  <button
+                                    onClick={(e) => handleDeleteClick(chat, e)}
+                                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                                  >
+                                    <Trash2 className="h-4 w-4 text-red-500" />
+                                    <span>Delete</span>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     )
@@ -556,13 +517,6 @@ export default function Sidebar() {
         }}
         onConfirm={handleRenameConfirm}
         currentTitle={chatToRename?.title || ''}
-      />
-
-      {/* AI Insights Modal */}
-      <AIInsightsModal
-        open={insightsModalOpen}
-        onOpenChange={setInsightsModalOpen}
-        insights={insights}
       />
     </>
   )

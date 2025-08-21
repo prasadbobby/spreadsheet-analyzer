@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { toast } from 'sonner'
 import {
   Send,
   Download,
@@ -29,11 +30,19 @@ import {
   Zap,
   Copy,
   MessageSquare,
+  Users,
+  DollarSign,
+  AlertTriangle,
+  Target,
+  GitMerge,
+  Bug,
+  Clock,
+  CheckCircle,
+  Activity
 } from "lucide-react";
 import { useAISheetChat } from "@/contexts/AISheetChatContext";
 import { formatMessageText, getCurrentTime } from "@/lib/utils";
 import WelcomeScreen from "@/components/WelcomeScreen";
-// import VirtualizedDataTable from "@/components/VirtualizedDataTable";
 import OptimizedDataTable from "./OptimizedDataTable";
 import ChartVisualization from "@/components/ChartVisualization";
 import ClearSessionDialog from "@/components/ClearSessionDialog";
@@ -50,6 +59,7 @@ export default function MainContent() {
     messages,
     sendMessage,
     clearChat,
+    datasetInfo,
   } = useAISheetChat();
 
   const [inputMessage, setInputMessage] = useState("");
@@ -159,45 +169,179 @@ export default function MainContent() {
     clearChat();
   }, [clearChat]);
 
-  // Memoized quick actions to prevent re-creation
-  const quickActions = useMemo(
-    () => [
+  // Enhanced quick actions based on dataset type
+const quickActions = useMemo(() => {
+  // Get dataset type from context if available
+  const datasetType = datasetInfo?.dataset_type || datasetInfo?.context?.type || 'general';
+  
+  if (datasetType === 'jira') {
+    return [
+      {
+        icon: Search,
+        label: "Similar Bugs",
+        message: "Find tickets with similar error messages or symptoms to a specific issue",
+        color: "bg-red-50 text-red-700 border-red-200 hover:bg-red-100",
+      },
+      {
+        icon: TrendingUp,
+        label: "Trends",
+        message: "Analyze ticket trends over the last quarter",
+        color: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
+      },
+      {
+        icon: AlertTriangle,
+        label: "Critical",
+        message: "Show all critical and high priority tickets",
+        color: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
+      },
+      {
+        icon: Users,
+        label: "Assignees",
+        message: "Group tickets by assignee and workload",
+        color: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100",
+      },
+      {
+        icon: CheckCircle,
+        label: "Resolved",
+        message: "Analyze resolved tickets and patterns",
+        color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
+      },
+    ];
+  } else if (datasetType === 'sales') {
+    return [
+      {
+        icon: DollarSign,
+        label: "Revenue",
+        message: "Show revenue trends and top products",
+        color: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100",
+      },
+      {
+        icon: Users,
+        label: "Customers",
+        message: "Analyze customer behavior and top clients",
+        color: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
+      },
+      {
+        icon: TrendingUp,
+        label: "Trends",
+        message: "Analyze sales performance over time",
+        color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
+      },
+      {
+        icon: BarChart3,
+        label: "Products",
+        message: "Show product performance rankings",
+        color: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
+      },
+      {
+        icon: Target,
+        label: "Regions",
+        message: "Compare performance across regions",
+        color: "bg-red-50 text-red-700 border-red-200 hover:bg-red-100",
+      },
+    ];
+  } else if (datasetType === 'hr') {
+    return [
+      {
+        icon: Users,
+        label: "Teams",
+        message: "Analyze team and department distributions",
+        color: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
+      },
+      {
+        icon: DollarSign,
+        label: "Salary",
+        message: "Analyze salary by department and role",
+        color: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100",
+      },
+      {
+        icon: TrendingUp,
+        label: "Performance",
+        message: "Analyze performance ratings and trends",
+        color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
+      },
+      {
+        icon: Clock,
+        label: "Tenure",
+        message: "Analyze employee tenure and retention",
+        color: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
+      },
+      {
+        icon: Activity,
+        label: "Skills",
+        message: "Identify skills and training needs",
+        color: "bg-red-50 text-red-700 border-red-200 hover:bg-red-100",
+      },
+    ];
+  } else if (datasetType === 'finance') {
+    return [
+      {
+        icon: DollarSign,
+        label: "Transactions",
+        message: "Analyze transaction patterns and trends",
+        color: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100",
+      },
+      {
+        icon: TrendingUp,
+        label: "Budget",
+        message: "Compare budget vs actual expenses",
+        color: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
+      },
+      {
+        icon: AlertTriangle,
+        label: "Anomalies",
+        message: "Find unusual transactions or outliers",
+        color: "bg-red-50 text-red-700 border-red-200 hover:bg-red-100",
+      },
+      {
+        icon: BarChart3,
+        label: "Categories",
+        message: "Analyze expenses by category",
+        color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
+      },
+      {
+        icon: Clock,
+        label: "Cash Flow",
+        message: "Analyze payment timing and flow",
+        color: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
+      },
+    ];
+  } else {
+    // General dataset actions
+    return [
       {
         icon: Eye,
-        label: "View All Data",
+        label: "View All",
         message: "Show me all the data",
         color: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
       },
       {
         icon: TrendingUp,
-        label: "Analyze Trends",
-        message: "Analyze this dataset for patterns and trends",
+        label: "Trends",
+        message: "Analyze patterns and trends",
         color: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100",
       },
       {
         icon: BarChart3,
-        label: "Create Chart",
-        message: "Visualize this data with a chart",
-        color:
-          "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
+        label: "Chart",
+        message: "Visualize with charts",
+        color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
       },
       {
-        icon: Search,
-        label: "Find Similar",
-        message: "Find similar records and duplicates in this data",
-        color:
-          "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
+        icon: GitMerge,
+        label: "Similar",
+        message: "Find similar or duplicate records",
+        color: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
       },
       {
         icon: Lightbulb,
-        label: "Get Summary",
-        message: "Give me a comprehensive summary of this dataset",
-        color:
-          "bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100",
+        label: "Summary",
+        message: "Get comprehensive insights",
+        color: "bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100",
       },
-    ],
-    []
-  );
+    ];
+  }
+}, [datasetInfo]);
 
   // Memoized helper functions
   const getAnalysisIcon = useCallback((analysisType) => {
@@ -210,6 +354,14 @@ export default function MainContent() {
       direct_analysis: Lightbulb,
       overview: Eye,
       patterns: Search,
+      similarity_analysis: GitMerge,
+      jira_analysis: Bug,
+      sales_analysis: DollarSign,
+      hr_analysis: Users,
+      finance_analysis: DollarSign,
+      trend_analysis: TrendingUp,
+      summary_analysis: BarChart3,
+      general_analysis: Sparkles,
     };
     return icons[analysisType] || Sparkles;
   }, []);
@@ -224,6 +376,14 @@ export default function MainContent() {
       direct_analysis: "Analysis",
       overview: "Overview",
       patterns: "Pattern Recognition",
+      similarity_analysis: "Similarity Analysis",
+      jira_analysis: "JIRA Analysis",
+      sales_analysis: "Sales Analysis",
+      hr_analysis: "HR Analysis",
+      finance_analysis: "Finance Analysis",
+      trend_analysis: "Trend Analysis",
+      summary_analysis: "Summary Analysis",
+      general_analysis: "General Analysis",
     };
     return labels[analysisType] || "AI Response";
   }, []);
@@ -238,13 +398,43 @@ export default function MainContent() {
       direct_analysis: "bg-yellow-100 text-yellow-800",
       overview: "bg-indigo-100 text-indigo-800",
       patterns: "bg-teal-100 text-teal-800",
+      similarity_analysis: "bg-red-100 text-red-800",
+      jira_analysis: "bg-red-100 text-red-800",
+      sales_analysis: "bg-green-100 text-green-800",
+      hr_analysis: "bg-blue-100 text-blue-800",
+      finance_analysis: "bg-green-100 text-green-800",
+      trend_analysis: "bg-purple-100 text-purple-800",
+      summary_analysis: "bg-orange-100 text-orange-800",
+      general_analysis: "bg-gray-100 text-gray-800",
     };
     return colors[analysisType] || "bg-gray-100 text-gray-800";
   }, []);
 
-  const copyToClipboard = useCallback((text) => {
-    navigator.clipboard.writeText(text);
-  }, []);
+const copyToClipboard = useCallback((text) => {
+  navigator.clipboard.writeText(text).then(() => {
+    toast.success('Copied to clipboard!', {
+      duration: 2000,
+      position: 'bottom-right'
+    });
+  }).catch(() => {
+    toast.error('Failed to copy to clipboard', {
+      duration: 2000,
+      position: 'bottom-right'
+    });
+  });
+}, []);
+  // Get dataset type display name
+  const getDatasetTypeDisplay = useCallback(() => {
+    const datasetType = datasetInfo?.dataset_type || datasetInfo?.context?.type || 'general';
+    const typeLabels = {
+      jira: 'JIRA Tickets',
+      sales: 'Sales Data',
+      hr: 'HR Records',
+      finance: 'Finance Data',
+      general: 'General Data'
+    };
+    return typeLabels[datasetType] || '📊 Data Analysis';
+  }, [datasetInfo]);
 
   // Memoized messages to prevent unnecessary re-renders
   const memoizedMessages = useMemo(() => {
@@ -318,13 +508,28 @@ export default function MainContent() {
             <div className="flex justify-between items-center">
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">
-                  AI Data Analysis
+                  {getDatasetTypeDisplay()}
                 </h1>
                 <p className="text-sm text-gray-600 mt-1">
                   {datasetLoaded
                     ? "Ask questions about your data in natural language"
                     : "Upload data to this session to start analyzing"}
                 </p>
+                {datasetLoaded && datasetInfo && (
+                  <div className="flex items-center gap-4 mt-2">
+                    <Badge variant="secondary" className="text-xs bg-green-100 text-green-800">
+                      {datasetInfo.shape?.rows?.toLocaleString() || 'Unknown'} rows
+                    </Badge>
+                    <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800">
+                      {datasetInfo.shape?.columns || 'Unknown'} columns
+                    </Badge>
+                    {datasetInfo.file_size_formatted && (
+                      <Badge variant="secondary" className="text-xs bg-purple-100 text-purple-800">
+                        {datasetInfo.file_size_formatted}
+                      </Badge>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex gap-3">
                 <Button
@@ -394,34 +599,36 @@ export default function MainContent() {
         <div className="border-t border-gray-200 bg-white shadow-lg flex-shrink-0">
           <div className="p-6">
             <div className="max-w-4xl mx-auto space-y-4">
-              {/* Quick Actions - Only show when needed */}
-              {datasetLoaded && messages.length === 1 && (
-                <div className="mb-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Zap className="h-4 w-4 text-purple-600" />
-                    <span className="text-sm font-medium text-gray-700">
-                      Quick Actions
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                    {quickActions.map((action, index) => (
-                      <Button
-                        key={index}
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setQuickMessage(action.message)}
-                        disabled={
-                          !datasetLoaded || isProcessing || !currentChatId
-                        }
-                        className={`text-xs h-auto p-4 flex flex-col items-center gap-2 hover:shadow-md transition-all ${action.color}`}
-                      >
-                        <action.icon className="h-5 w-5" />
-                        <span className="font-medium">{action.label}</span>
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              )}
+             {/* Enhanced Quick Actions - Compact Version */}
+{/* Super Compact Quick Actions */}
+{datasetLoaded && messages.length <= 2 && (
+  <div className="mb-4">
+    <div className="flex items-center gap-2 mb-2">
+      <Zap className="h-3 w-3 text-purple-600" />
+      <span className="text-xs font-medium text-gray-700">
+        Quick Actions
+      </span>
+    </div>
+    <div className="flex flex-wrap gap-1">
+      {quickActions.map((action, index) => (
+        <Button
+          key={index}
+          variant="outline"
+          size="sm"
+          onClick={() => setQuickMessage(action.message)}
+          disabled={
+            !datasetLoaded || isProcessing || !currentChatId
+          }
+          className={`text-xs h-8 px-3 flex items-center gap-1 hover:shadow-sm transition-all ${action.color}`}
+          title={action.message}
+        >
+          <action.icon className="h-3 w-3" />
+          <span className="font-medium">{action.label}</span>
+        </Button>
+      ))}
+    </div>
+  </div>
+)}
 
               {/* Optimized Input Field */}
               <div className="flex gap-4 items-end">
@@ -436,7 +643,7 @@ export default function MainContent() {
                         ? "Create or select a chat session first..."
                         : !datasetLoaded
                         ? "Upload your dataset to this session first to start analyzing..."
-                        : "Ask me anything about your data - I can analyze patterns, create insights, and answer complex questions..."
+                        : `Ask me anything about your ${getDatasetTypeDisplay().toLowerCase()} - I understand natural language and can provide detailed insights...`
                     }
                     disabled={!datasetLoaded || isProcessing || !currentChatId}
                     className="min-h-[60px] max-h-[120px] resize-none border-gray-200 focus:border-purple-500 focus:ring-purple-500 rounded-xl shadow-sm text-sm"
@@ -463,13 +670,25 @@ export default function MainContent() {
                 </Button>
               </div>
 
-              {/* Helper Text */}
+              {/* Enhanced Helper Text */}
               {datasetLoaded && currentChatId && (
                 <div className="text-center">
                   <p className="text-xs text-gray-500">
-                    💡 Try: &quot;Create a bar chart&quot;, &quot;Show sales by
-                    department&quot;, &quot;Find similar records&quot;, or
-                    &quot;Summarize key insights&quot;
+                    {(() => {
+                      const datasetType = datasetInfo?.dataset_type || datasetInfo?.context?.type || 'general';
+                      switch (datasetType) {
+                        case 'jira':
+                          return '🐛 Try: "Find similar bugs to timeout error", "Show critical tickets", "Analyze trends by assignee"';
+                        case 'sales':
+                          return '💰 Try: "Show top customers by revenue", "Analyze sales trends", "Compare product performance"';
+                        case 'hr':
+                          return '👥 Try: "Show salary by department", "Analyze performance ratings", "Find employees with specific skills"';
+                        case 'finance':
+                          return '💳 Try: "Analyze spending patterns", "Find unusual transactions", "Show budget vs actual"';
+                        default:
+                          return '💡 Try: "Create a bar chart", "Show summary statistics", "Find similar records", "Analyze patterns"';
+                      }
+                    })()}
                   </p>
                 </div>
               )}
@@ -497,7 +716,7 @@ export default function MainContent() {
   );
 }
 
-// Memoized Message Component
+// Enhanced Memoized Message Component
 const MessageBubble = React.memo(
   ({
     message,
@@ -510,7 +729,7 @@ const MessageBubble = React.memo(
       <div
         className={`flex gap-6 ${
           message.type === "user" ? "justify-end" : "justify-start"
-        } fade-in`}
+        } fade-in group`}
       >
         {/* Assistant Avatar - Left Side */}
         {message.type === "assistant" && (
@@ -536,7 +755,9 @@ const MessageBubble = React.memo(
             }
           >
             {/* Message Header */}
-            <div className="px-6 py-4 border-b border-gray-100">
+            <div className={`px-6 py-4 border-b ${
+              message.type === "user" ? "border-white/20" : "border-gray-100"
+            }`}>
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-3">
                   <span
@@ -563,6 +784,11 @@ const MessageBubble = React.memo(
                       })()}
                     </Badge>
                   )}
+                  {message.type === "assistant" && message.dataset_type && (
+                    <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800">
+                      {message.dataset_type.toUpperCase()}
+                    </Badge>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -581,6 +807,7 @@ const MessageBubble = React.memo(
                       variant="ghost"
                       className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 hover:bg-gray-100"
                       onClick={() => copyToClipboard(message.content)}
+                      title="Copy response"
                     >
                       <Copy className="h-3 w-3" />
                     </Button>
@@ -615,6 +842,7 @@ const MessageBubble = React.memo(
                       variant="ghost"
                       className="h-6 w-6 p-0"
                       onClick={() => copyToClipboard(message.query)}
+                      title="Copy SQL query"
                     >
                       <Copy className="h-3 w-3" />
                     </Button>

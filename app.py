@@ -1,4 +1,4 @@
-# app.py - Complete updated version with all fixes
+# app.py - Enhanced with conversational AI capabilities
 
 import os
 import json
@@ -360,6 +360,471 @@ def read_generic_xml(content):
     except Exception as e:
         print(f"Generic XML parsing failed: {e}")
         raise Exception(f"Could not parse XML structure: {e}")
+
+class ConversationalAI:
+    """Enhanced conversational AI for any dataset type"""
+    
+    def __init__(self):
+        self.gemini_api_key = os.getenv('GEMINI_API_KEY')
+        self.gemini_url = os.getenv('GEMINI_API_URL', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent')
+        
+        if not self.gemini_api_key:
+            raise ValueError("GEMINI_API_KEY environment variable is required")
+    
+    def analyze_dataset_context(self, dataset_info):
+        """Analyze dataset to understand its context and type"""
+        try:
+            columns = dataset_info['columns']
+            sample_data = dataset_info['sample_data']
+            
+            # Common patterns for different dataset types
+            jira_indicators = [
+                'key', 'summary', 'description', 'status', 'priority', 'assignee', 
+                'reporter', 'issue_type', 'resolution', 'created', 'updated'
+            ]
+            
+            sales_indicators = [
+                'customer', 'product', 'revenue', 'sales', 'order', 'amount', 
+                'price', 'quantity', 'transaction'
+            ]
+            
+            hr_indicators = [
+                'employee', 'name', 'department', 'salary', 'position', 'manager',
+                'hire_date', 'performance', 'review'
+            ]
+            
+            finance_indicators = [
+                'account', 'balance', 'transaction', 'credit', 'debit', 'amount',
+                'invoice', 'payment', 'expense', 'budget'
+            ]
+            
+            # Check which type this dataset might be
+            column_str = ' '.join([col.lower() for col in columns])
+            
+            dataset_type = 'general'
+            confidence = 0
+            
+            jira_score = sum(1 for indicator in jira_indicators if indicator in column_str)
+            sales_score = sum(1 for indicator in sales_indicators if indicator in column_str)
+            hr_score = sum(1 for indicator in hr_indicators if indicator in column_str)
+            finance_score = sum(1 for indicator in finance_indicators if indicator in column_str)
+            
+            scores = {
+                'jira': jira_score,
+                'sales': sales_score,
+                'hr': hr_score,
+                'finance': finance_score
+            }
+            
+            max_score = max(scores.values())
+            if max_score >= 3:
+                dataset_type = max(scores.keys(), key=lambda x: scores[x])
+                confidence = min(max_score / 5, 1.0)
+            
+            return {
+                'type': dataset_type,
+                'confidence': confidence,
+                'characteristics': self._extract_characteristics(columns, sample_data),
+                'suggestions': self._generate_suggestions(dataset_type, columns)
+            }
+            
+        except Exception as e:
+            print(f"Error analyzing dataset context: {e}")
+            return {
+                'type': 'general',
+                'confidence': 0,
+                'characteristics': {},
+                'suggestions': []
+            }
+    
+    def _extract_characteristics(self, columns, sample_data):
+        """Extract key characteristics of the dataset"""
+        characteristics = {
+            'total_columns': len(columns),
+            'text_columns': [],
+            'numeric_columns': [],
+            'date_columns': [],
+            'categorical_columns': []
+        }
+        
+        if sample_data:
+            first_row = sample_data[0] if sample_data else {}
+            
+            for col in columns:
+                if col in first_row:
+                    value = first_row[col]
+                    
+                    # Check if it looks like a date
+                    if isinstance(value, str) and self._is_date_like(value):
+                        characteristics['date_columns'].append(col)
+                    # Check if numeric
+                    elif isinstance(value, (int, float)) or (isinstance(value, str) and value.replace('.', '').replace('-', '').isdigit()):
+                        characteristics['numeric_columns'].append(col)
+                    # Text columns
+                    else:
+                        characteristics['text_columns'].append(col)
+        
+        return characteristics
+    
+    def _is_date_like(self, value):
+        """Check if a string value looks like a date"""
+        date_patterns = [
+            r'\d{4}-\d{2}-\d{2}',  # 2023-12-01
+            r'\d{2}/\d{2}/\d{4}',  # 12/01/2023
+            r'\d{1,2}/\w{3}/\d{2,4}',  # 1/Jan/23
+            r'\w{3}\s+\d{1,2},?\s+\d{4}',  # Jan 1, 2023
+        ]
+        
+        if isinstance(value, str):
+            for pattern in date_patterns:
+                if re.search(pattern, value):
+                    return True
+        return False
+    
+    def _generate_suggestions(self, dataset_type, columns):
+        """Generate contextual suggestions based on dataset type"""
+        suggestions = []
+        
+        if dataset_type == 'jira':
+            suggestions = [
+                "Find tickets with similar error messages to a specific bug",
+                "Analyze ticket trends over time periods",
+                "Show all critical or high priority issues",
+                "Find resolved tickets with similar symptoms",
+                "Group tickets by component or assignee",
+                "Identify recurring issues or patterns"
+            ]
+        elif dataset_type == 'sales':
+            suggestions = [
+                "Show top performing products this quarter",
+                "Analyze sales trends by region or time",
+                "Find customers with highest revenue",
+                "Compare performance across different periods",
+                "Identify seasonal patterns in sales",
+                "Show revenue breakdown by category"
+            ]
+        elif dataset_type == 'hr':
+            suggestions = [
+                "Show employees by department and role",
+                "Analyze salary distributions and ranges",
+                "Find employees with specific qualifications",
+                "Track performance ratings over time",
+                "Show hiring trends by period",
+                "Compare compensation across departments"
+            ]
+        elif dataset_type == 'finance':
+            suggestions = [
+                "Analyze spending patterns by category",
+                "Show account balances and transactions",
+                "Find unusual or large transactions",
+                "Track budget vs actual expenses",
+                "Identify payment delays or issues",
+                "Show financial trends over time"
+            ]
+        else:
+            # General suggestions
+            suggestions = [
+                "Show me a summary of the data",
+                "Find records with specific criteria",
+                "Analyze trends and patterns",
+                "Group data by categories",
+                "Show statistics and distributions",
+                "Find similar or duplicate records"
+            ]
+        
+        return suggestions
+    
+    def generate_conversational_response(self, question, results, dataset_info, sql_query, dataset_context):
+        """Generate a conversational response about the dataset"""
+        try:
+            result_count = len(results) if results else 0
+            dataset_type = dataset_context.get('type', 'general')
+            
+            # Prepare context for AI
+            if result_count > 10:
+                results_for_ai = results[:10]
+            else:
+                results_for_ai = results
+            
+            results_json = safe_json_dumps(results_for_ai) if results_for_ai else "[]"
+            
+            # Create a conversational prompt based on dataset type
+            if dataset_type == 'jira':
+                prompt = self._create_jira_prompt(question, results_json, result_count, dataset_info, sql_query)
+            elif dataset_type == 'sales':
+                prompt = self._create_sales_prompt(question, results_json, result_count, dataset_info, sql_query)
+            elif dataset_type == 'hr':
+                prompt = self._create_hr_prompt(question, results_json, result_count, dataset_info, sql_query)
+            elif dataset_type == 'finance':
+                prompt = self._create_finance_prompt(question, results_json, result_count, dataset_info, sql_query)
+            else:
+                prompt = self._create_general_prompt(question, results_json, result_count, dataset_info, sql_query)
+            
+            response = self._call_gemini_api(prompt)
+            return response
+            
+        except Exception as e:
+            print(f"Error generating conversational response: {e}")
+            return f"I found {result_count} results for your query. The data shows various patterns that might be helpful for your analysis."
+    
+    def _create_jira_prompt(self, question, results_json, result_count, dataset_info, sql_query):
+        """Create JIRA-specific conversational prompt"""
+        return f"""
+You are a JIRA data analyst assistant helping with ticket analysis. The user asked: "{question}"
+
+JIRA DATASET CONTEXT: 
+- Total tickets in dataset: {dataset_info['total_rows']:,}
+- Analysis found: {result_count:,} matching tickets
+- Columns include: {', '.join(dataset_info['columns'][:10])}{'...' if len(dataset_info['columns']) > 10 else ''}
+
+SQL EXECUTED: {sql_query}
+SAMPLE RESULTS (first 10 of {result_count}): {results_json}
+
+Provide a conversational, helpful analysis that:
+
+1. **TICKET OVERVIEW**: Start with "I found {result_count:,} tickets that match your query..."
+
+2. **KEY INSIGHTS**: 
+   - Summarize the main findings about the tickets
+   - Highlight patterns in status, priority, assignees, or components
+   - Mention any trends in creation dates or resolution times
+   - Point out critical or high-priority issues if present
+
+3. **SIMILARITY ANALYSIS** (if relevant):
+   - Group tickets by similar symptoms or error messages
+   - Identify recurring issues or root causes
+   - Suggest related tickets that might be helpful
+
+4. **ACTIONABLE RECOMMENDATIONS**:
+   - Suggest follow-up queries or investigations
+   - Recommend priority actions based on the findings
+   - Point out any tickets that need immediate attention
+
+5. **CONTEXT**: Mention that the complete ticket details are available in the table below
+
+Be conversational, specific, and focus on practical insights that would help with ticket management and bug resolution.
+
+Response:
+"""
+
+    def _create_sales_prompt(self, question, results_json, result_count, dataset_info, sql_query):
+        """Create sales-specific conversational prompt"""
+        return f"""
+You are a sales data analyst assistant. The user asked: "{question}"
+
+SALES DATASET CONTEXT:
+- Total records: {dataset_info['total_rows']:,}
+- Analysis results: {result_count:,} records
+- Data includes: {', '.join(dataset_info['columns'][:10])}{'...' if len(dataset_info['columns']) > 10 else ''}
+
+SQL EXECUTED: {sql_query}
+SAMPLE RESULTS (first 10 of {result_count}): {results_json}
+
+Provide a business-focused analysis:
+
+1. **SALES OVERVIEW**: "I analyzed {result_count:,} sales records and found..."
+
+2. **KEY METRICS & TRENDS**:
+   - Revenue totals, averages, or patterns
+   - Top performing products, customers, or regions
+   - Time-based trends (monthly, quarterly, etc.)
+   - Notable achievements or concerning drops
+
+3. **BUSINESS INSIGHTS**:
+   - What the data reveals about sales performance
+   - Opportunities for growth or improvement
+   - Seasonal patterns or market trends
+   - Customer behavior insights
+
+4. **RECOMMENDATIONS**:
+   - Strategic actions based on the findings
+   - Areas to focus on or investigate further
+   - Potential risks or opportunities
+
+Be business-oriented, highlight key metrics, and provide actionable insights.
+
+Response:
+"""
+
+    def _create_hr_prompt(self, question, results_json, result_count, dataset_info, sql_query):
+        """Create HR-specific conversational prompt"""
+        return f"""
+You are an HR data analyst assistant. The user asked: "{question}"
+
+HR DATASET CONTEXT:
+- Total employee records: {dataset_info['total_rows']:,}
+- Analysis results: {result_count:,} records
+- Data includes: {', '.join(dataset_info['columns'][:10])}{'...' if len(dataset_info['columns']) > 10 else ''}
+
+SQL EXECUTED: {sql_query}
+SAMPLE RESULTS (first 10 of {result_count}): {results_json}
+
+Provide an HR-focused analysis:
+
+1. **WORKFORCE OVERVIEW**: "I found {result_count:,} employee records that show..."
+
+2. **KEY HR METRICS**:
+   - Department distributions and team sizes
+   - Salary ranges and compensation patterns
+   - Experience levels and tenure
+   - Performance ratings or reviews
+
+3. **PEOPLE INSIGHTS**:
+   - Workforce composition and diversity
+   - Career progression patterns
+   - Compensation equity analysis
+   - Skill gaps or strengths
+
+4. **HR RECOMMENDATIONS**:
+   - Talent management opportunities
+   - Compensation review suggestions
+   - Training or development needs
+   - Retention strategies
+
+Be professional, focus on people analytics, and ensure privacy considerations.
+
+Response:
+"""
+
+    def _create_finance_prompt(self, question, results_json, result_count, dataset_info, sql_query):
+        """Create finance-specific conversational prompt"""
+        return f"""
+You are a financial data analyst assistant. The user asked: "{question}"
+
+FINANCIAL DATASET CONTEXT:
+- Total transactions/records: {dataset_info['total_rows']:,}
+- Analysis results: {result_count:,} records
+- Data includes: {', '.join(dataset_info['columns'][:10])}{'...' if len(dataset_info['columns']) > 10 else ''}
+
+SQL EXECUTED: {sql_query}
+SAMPLE RESULTS (first 10 of {result_count}): {results_json}
+
+Provide a financial analysis:
+
+1. **FINANCIAL OVERVIEW**: "I analyzed {result_count:,} financial records and discovered..."
+
+2. **KEY FINANCIAL METRICS**:
+   - Transaction volumes and amounts
+   - Account balances and movements
+   - Spending patterns and categories
+   - Revenue or expense trends
+
+3. **FINANCIAL INSIGHTS**:
+   - Cash flow patterns
+   - Budget performance vs actuals
+   - Cost center analysis
+   - Financial health indicators
+
+4. **FINANCIAL RECOMMENDATIONS**:
+   - Cost optimization opportunities
+   - Revenue enhancement strategies
+   - Risk management suggestions
+   - Financial planning insights
+
+Be analytical, focus on financial KPIs, and provide strategic financial insights.
+
+Response:
+"""
+
+    def _create_general_prompt(self, question, results_json, result_count, dataset_info, sql_query):
+        """Create general conversational prompt"""
+        return f"""
+You are a helpful data analyst assistant. The user asked: "{question}"
+
+DATASET CONTEXT:
+- Total records: {dataset_info['total_rows']:,}
+- Analysis results: {result_count:,} records
+- Columns: {len(dataset_info['columns'])} total
+- Key fields: {', '.join(dataset_info['columns'][:8])}{'...' if len(dataset_info['columns']) > 8 else ''}
+
+SQL EXECUTED: {sql_query}
+SAMPLE RESULTS (first 10 of {result_count}): {results_json}
+
+Provide a conversational, insightful analysis:
+
+1. **DATA OVERVIEW**: "I found {result_count:,} records in your dataset that..."
+
+2. **KEY FINDINGS**:
+   - Main patterns or trends in the data
+   - Notable values, outliers, or interesting observations
+   - Relationships between different data fields
+   - Summary statistics where relevant
+
+3. **INSIGHTS & ANALYSIS**:
+   - What the data reveals about the underlying patterns
+   - Correlations or connections you can identify
+   - Trends over time if date fields are present
+   - Groupings or categories that emerge
+
+4. **SUGGESTIONS**:
+   - Follow-up questions that might be interesting
+   - Other ways to analyze or slice the data
+   - Potential areas for deeper investigation
+
+Be conversational, curious, and help the user understand their data in a meaningful way.
+
+Response:
+"""
+
+    def _call_gemini_api(self, prompt):
+        """Call Gemini API with proper error handling for rate limits"""
+        headers = {'Content-Type': 'application/json'}
+        
+        data = {
+            'contents': [{'parts': [{'text': prompt}]}],
+            'generationConfig': {
+                'temperature': 0.3,
+                'topP': 0.8,
+                'topK': 40,
+                'maxOutputTokens': 2500,
+            }
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.gemini_url}?key={self.gemini_api_key}",
+                headers=headers,
+                json=data,
+                timeout=30,
+                verify=False
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if 'candidates' in result and result['candidates']:
+                    return result['candidates'][0]['content']['parts'][0]['text']
+                else:
+                    raise Exception("No response from Gemini")
+            elif response.status_code == 429:
+                # Rate limit exceeded
+                try:
+                    error_data = response.json()
+                    error_message = error_data.get('error', {}).get('message', 'Rate limit exceeded')
+                    if 'RESOURCE_EXHAUSTED' in error_message:
+                        raise Exception("RATE_LIMIT_EXCEEDED: You've exceeded the Gemini API rate limit. Please wait a moment or update your API key with a higher quota.")
+                    else:
+                        raise Exception(f"RATE_LIMIT_EXCEEDED: {error_message}")
+                except:
+                    raise Exception("RATE_LIMIT_EXCEEDED: Gemini API rate limit exceeded. Please try again later or upgrade your API quota.")
+            else:
+                # Other API errors
+                try:
+                    error_data = response.json()
+                    error_message = error_data.get('error', {}).get('message', f'HTTP {response.status_code}')
+                    raise Exception(f"GEMINI_API_ERROR: {error_message}")
+                except:
+                    raise Exception(f"GEMINI_API_ERROR: HTTP {response.status_code} - {response.text[:200]}")
+                
+        except requests.exceptions.Timeout:
+            raise Exception("GEMINI_API_TIMEOUT: Request to Gemini API timed out. Please try again.")
+        except requests.exceptions.ConnectionError:
+            raise Exception("GEMINI_API_CONNECTION: Cannot connect to Gemini API. Please check your internet connection.")
+        except Exception as e:
+            if str(e).startswith(('RATE_LIMIT_EXCEEDED:', 'GEMINI_API_ERROR:', 'GEMINI_API_TIMEOUT:', 'GEMINI_API_CONNECTION:')):
+                raise e
+            else:
+                print(f"Gemini API error: {e}")
+                raise Exception(f"GEMINI_API_ERROR: {str(e)}")
 
 class SimilarityAnalyzer:
     """Advanced similarity detection for any dataset"""
@@ -834,16 +1299,12 @@ class SimilarityAnalyzer:
         return display_records
 
 class ChatMCPProcessor:
-    """Chat-specific MCP processor for maintaining dataset isolation"""
+    """Enhanced Chat-specific MCP processor with conversational AI"""
     def __init__(self):
         # Store chat-specific datasets: {chat_id: dataset_info}
         self.chat_datasets = {}
-        self.gemini_api_key = os.getenv('GEMINI_API_KEY')
-        self.gemini_url = os.getenv('GEMINI_API_URL', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent')
+        self.conversational_ai = ConversationalAI()
         
-        if not self.gemini_api_key:
-            raise ValueError("GEMINI_API_KEY environment variable is required")
-    
     def load_dataset_for_chat(self, file_path, chat_id):
         """Load dataset specifically for a chat session"""
         try:
@@ -986,6 +1447,10 @@ class ChatMCPProcessor:
                 'actual_format': actual_format
             }
             
+            # Analyze dataset context for conversational AI
+            dataset_context = self.conversational_ai.analyze_dataset_context(dataset_info)
+            dataset_info['context'] = dataset_context
+            
             # Create chat-specific SQLite database
             sqlite_path = file_path.replace(file_extension, f'_chat_{chat_id}.db')
             dataset_info['sqlite_path'] = sqlite_path
@@ -996,6 +1461,7 @@ class ChatMCPProcessor:
                 # Store dataset info for this chat
                 self.chat_datasets[chat_id] = dataset_info
                 print(f"Dataset loaded successfully for chat {chat_id}: {total_rows:,} rows, {len(sample_df.columns)} columns")
+                print(f"Dataset type detected: {dataset_context['type']} (confidence: {dataset_context['confidence']:.1%})")
                 
                 # Update chat database with dataset info
                 self._save_chat_dataset_info(chat_id, dataset_info)
@@ -1112,560 +1578,512 @@ class ChatMCPProcessor:
             conn.close()
         except Exception as e:
             print(f"Error cleaning up chat dataset: {e}")
-    
+   
     def get_chat_dataset_info(self, chat_id):
-        """Get dataset info for a specific chat"""
-        if chat_id in self.chat_datasets:
-            return self.chat_datasets[chat_id]
-        return None
-    
+       """Get dataset info for a specific chat"""
+       if chat_id in self.chat_datasets:
+           return self.chat_datasets[chat_id]
+       return None
+   
     def has_dataset_for_chat(self, chat_id):
-        """Check if chat has a dataset loaded"""
-        return chat_id in self.chat_datasets
-    
+       """Check if chat has a dataset loaded"""
+       return chat_id in self.chat_datasets
+   
     def _create_sqlite_db(self, file_path, sqlite_path, dataset_info):
-        """Create SQLite database from file with robust handling"""
-        try:
-            print(f"Creating SQLite database: {sqlite_path}")
-            
-            file_extension = Path(file_path).suffix.lower()
-            actual_format = dataset_info.get('actual_format', file_extension[1:])
-            
-            conn = sqlite3.connect(sqlite_path)
-            
-            # Increase SQLite limits for large datasets
-            conn.execute("PRAGMA temp_store = MEMORY")
-            conn.execute("PRAGMA mmap_size = 268435456")
-            conn.execute("PRAGMA page_size = 65536")
-            conn.execute("PRAGMA cache_size = 10000")
-            conn.execute("PRAGMA synchronous = OFF")
-            conn.execute("PRAGMA journal_mode = MEMORY")
-            
-            # Determine appropriate chunk size
-            num_columns = len(dataset_info['columns'])
-            
-            if num_columns > 100:
-                chunk_size = max(1, int(800 / num_columns))
-            elif num_columns > 50:
-                chunk_size = max(10, int(900 / num_columns))
-            else:
-                chunk_size = 1000
-                
-            print(f"Using chunk size: {chunk_size} rows (for {num_columns} columns)")
-            
-            processed_chunks = 0
-            total_processed = 0
-            
-            if actual_format == 'csv_like' or file_extension == '.csv':
-                chunk_iterator = pd.read_csv(file_path, chunksize=chunk_size, low_memory=False)
-                
-                for chunk in chunk_iterator:
-                    # Ensure columns match
-                    chunk.columns = dataset_info['columns']
-                    success = self._process_chunk_to_sqlite(chunk, conn, processed_chunks == 0, dataset_info)
-                    if not success:
-                        break
-                        
-                    processed_chunks += 1
-                    total_processed += len(chunk)
-                    
-                    if processed_chunks % 10 == 0:
-                        print(f"Processed {total_processed:,} rows...")
-                        
-            elif actual_format == 'html_xml':
-                # Read the full HTML/XML file
-                full_df = read_html_xml_as_dataframe(file_path)
-                full_df.columns = dataset_info['columns']
-                
-                # Process in chunks
-                for i in range(0, len(full_df), chunk_size):
-                    chunk = full_df.iloc[i:i+chunk_size]
-                    success = self._process_chunk_to_sqlite(chunk, conn, processed_chunks == 0, dataset_info)
-                    if not success:
-                        break
-                    
-                    processed_chunks += 1
-                    total_processed += len(chunk)
-                    
-                    if processed_chunks % 10 == 0:
-                        print(f"Processed {total_processed:,} rows...")
-                        
-            else:
-                # Enhanced Excel processing with engine detection
-                print("Processing Excel file in batches...")
-                
-                # Determine which engine worked for this file
-                engines_to_try = ['openpyxl', 'xlrd']
-                if file_extension == '.xls':
-                    engines_to_try = ['xlrd', 'openpyxl']
-                
-                # Add calamine if available
-                try:
-                    import python_calamine
-                    engines_to_try.append('calamine')
-                except ImportError:
-                    pass
-                
-                working_engine = None
-                for engine in engines_to_try:
-                    try:
-                        # Test the engine
-                        test_df = pd.read_excel(file_path, nrows=1, engine=engine)
-                        working_engine = engine
-                        print(f"Using engine {engine} for batch processing")
-                        break
-                    except:
-                        continue
-                
-                if not working_engine:
-                    raise Exception("No working Excel engine found for batch processing")
-                
-                # Get total rows for progress tracking
-                total_rows = dataset_info['total_rows'] + 1  # Add header
-                start_row = 0
-                
-                while start_row < total_rows - 1:
-                    try:
-                        if start_row == 0:
-                            chunk = pd.read_excel(file_path, skiprows=0, nrows=chunk_size, engine=working_engine)
-                        else:
-                            chunk = pd.read_excel(file_path, skiprows=start_row + 1, nrows=chunk_size, 
-                                                header=None, engine=working_engine)
-                            chunk.columns = dataset_info['columns']
-                        
-                        if len(chunk) == 0:
-                            break
-                            
-                        success = self._process_chunk_to_sqlite(chunk, conn, processed_chunks == 0, dataset_info)
-                        if not success:
-                            break
-                        
-                        processed_chunks += 1
-                        total_processed += len(chunk)
-                        start_row += chunk_size
-                        
-                        print(f"Processed {total_processed:,} of {total_rows-1:,} rows...")
-                        
-                    except Exception as e:
-                        print(f"Error processing Excel batch starting at row {start_row}: {e}")
-                        break
-            
-            # Create indexes
-            print("Creating database indexes...")
-            cursor = conn.cursor()
-            
-            for i, col in enumerate(dataset_info['cleaned_columns'][:3]):
-                try:
-                    cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{col} ON data({col})")
-                except Exception as e:
-                    print(f"Could not create index on {col}: {e}")
-            
-            conn.commit()
-            conn.close()
-            
-            print(f"SQLite database created successfully: {sqlite_path}")
-            return True
-            
-        except Exception as e:
-            print(f"Error creating SQLite database: {e}")
-            traceback.print_exc()
-            return False
-    
+       """Create SQLite database from file with robust handling"""
+       try:
+           print(f"Creating SQLite database: {sqlite_path}")
+           
+           file_extension = Path(file_path).suffix.lower()
+           actual_format = dataset_info.get('actual_format', file_extension[1:])
+           
+           conn = sqlite3.connect(sqlite_path)
+           
+           # Increase SQLite limits for large datasets
+           conn.execute("PRAGMA temp_store = MEMORY")
+           conn.execute("PRAGMA mmap_size = 268435456")
+           conn.execute("PRAGMA page_size = 65536")
+           conn.execute("PRAGMA cache_size = 10000")
+           conn.execute("PRAGMA synchronous = OFF")
+           conn.execute("PRAGMA journal_mode = MEMORY")
+           
+           # Determine appropriate chunk size
+           num_columns = len(dataset_info['columns'])
+           
+           if num_columns > 100:
+               chunk_size = max(1, int(800 / num_columns))
+           elif num_columns > 50:
+               chunk_size = max(10, int(900 / num_columns))
+           else:
+               chunk_size = 1000
+               
+           print(f"Using chunk size: {chunk_size} rows (for {num_columns} columns)")
+           
+           processed_chunks = 0
+           total_processed = 0
+           
+           if actual_format == 'csv_like' or file_extension == '.csv':
+               chunk_iterator = pd.read_csv(file_path, chunksize=chunk_size, low_memory=False)
+               
+               for chunk in chunk_iterator:
+                   # Ensure columns match
+                   chunk.columns = dataset_info['columns']
+                   success = self._process_chunk_to_sqlite(chunk, conn, processed_chunks == 0, dataset_info)
+                   if not success:
+                       break
+                       
+                   processed_chunks += 1
+                   total_processed += len(chunk)
+                   
+                   if processed_chunks % 10 == 0:
+                       print(f"Processed {total_processed:,} rows...")
+                       
+           elif actual_format == 'html_xml':
+               # Read the full HTML/XML file
+               full_df = read_html_xml_as_dataframe(file_path)
+               full_df.columns = dataset_info['columns']
+               
+               # Process in chunks
+               for i in range(0, len(full_df), chunk_size):
+                   chunk = full_df.iloc[i:i+chunk_size]
+                   success = self._process_chunk_to_sqlite(chunk, conn, processed_chunks == 0, dataset_info)
+                   if not success:
+                       break
+                   
+                   processed_chunks += 1
+                   total_processed += len(chunk)
+                   
+                   if processed_chunks % 10 == 0:
+                       print(f"Processed {total_processed:,} rows...")
+                       
+           else:
+               # Enhanced Excel processing with engine detection
+               print("Processing Excel file in batches...")
+               
+               # Determine which engine worked for this file
+               engines_to_try = ['openpyxl', 'xlrd']
+               if file_extension == '.xls':
+                   engines_to_try = ['xlrd', 'openpyxl']
+               
+               # Add calamine if available
+               try:
+                   import python_calamine
+                   engines_to_try.append('calamine')
+               except ImportError:
+                   pass
+               
+               working_engine = None
+               for engine in engines_to_try:
+                   try:
+                       # Test the engine
+                       test_df = pd.read_excel(file_path, nrows=1, engine=engine)
+                       working_engine = engine
+                       print(f"Using engine {engine} for batch processing")
+                       break
+                   except:
+                       continue
+               
+               if not working_engine:
+                   raise Exception("No working Excel engine found for batch processing")
+               
+               # Get total rows for progress tracking
+               total_rows = dataset_info['total_rows'] + 1  # Add header
+               start_row = 0
+               
+               while start_row < total_rows - 1:
+                   try:
+                       if start_row == 0:
+                           chunk = pd.read_excel(file_path, skiprows=0, nrows=chunk_size, engine=working_engine)
+                       else:
+                           chunk = pd.read_excel(file_path, skiprows=start_row + 1, nrows=chunk_size, 
+                                               header=None, engine=working_engine)
+                           chunk.columns = dataset_info['columns']
+                       
+                       if len(chunk) == 0:
+                           break
+                           
+                       success = self._process_chunk_to_sqlite(chunk, conn, processed_chunks == 0, dataset_info)
+                       if not success:
+                           break
+                       
+                       processed_chunks += 1
+                       total_processed += len(chunk)
+                       start_row += chunk_size
+                       
+                       print(f"Processed {total_processed:,} of {total_rows-1:,} rows...")
+                       
+                   except Exception as e:
+                       print(f"Error processing Excel batch starting at row {start_row}: {e}")
+                       break
+           
+           # Create indexes
+           print("Creating database indexes...")
+           cursor = conn.cursor()
+           
+           for i, col in enumerate(dataset_info['cleaned_columns'][:3]):
+               try:
+                   cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{col} ON data({col})")
+               except Exception as e:
+                   print(f"Could not create index on {col}: {e}")
+           
+           conn.commit()
+           conn.close()
+           
+           print(f"SQLite database created successfully: {sqlite_path}")
+           return True
+           
+       except Exception as e:
+           print(f"Error creating SQLite database: {e}")
+           traceback.print_exc()
+           return False
+   
     def _process_chunk_to_sqlite(self, chunk, conn, is_first_chunk, dataset_info):
-        """Process a single chunk to SQLite"""
-        try:
-            # Clean column names
-            chunk.columns = [self._clean_column_name(col) for col in chunk.columns]
-            chunk = self._prepare_chunk_for_sqlite(chunk)
-            
-            num_columns = len(chunk.columns)
-            
-            if num_columns > 100:
-                return self._insert_chunk_individually(chunk, conn, is_first_chunk)
-            else:
-                batch_size = min(100, max(1, int(800 / num_columns)))
-                
-                for i in range(0, len(chunk), batch_size):
-                    batch = chunk.iloc[i:i+batch_size]
-                    batch.to_sql('data', conn, 
-                               if_exists='append' if not (is_first_chunk and i == 0) else 'replace',
-                               index=False, 
-                               method=None)
-                
-                return True
-                
-        except Exception as e:
-            print(f"Error processing chunk: {e}")
-            return False
-    
+       """Process a single chunk to SQLite"""
+       try:
+           # Clean column names
+           chunk.columns = [self._clean_column_name(col) for col in chunk.columns]
+           chunk = self._prepare_chunk_for_sqlite(chunk)
+           
+           num_columns = len(chunk.columns)
+           
+           if num_columns > 100:
+               return self._insert_chunk_individually(chunk, conn, is_first_chunk)
+           else:
+               batch_size = min(100, max(1, int(800 / num_columns)))
+               
+               for i in range(0, len(chunk), batch_size):
+                   batch = chunk.iloc[i:i+batch_size]
+                   batch.to_sql('data', conn, 
+                              if_exists='append' if not (is_first_chunk and i == 0) else 'replace',
+                              index=False, 
+                              method=None)
+               
+               return True
+               
+       except Exception as e:
+           print(f"Error processing chunk: {e}")
+           return False
+   
     def _insert_chunk_individually(self, chunk, conn, is_first_chunk):
-        """Insert chunk using individual INSERT statements"""
-        try:
-            cursor = conn.cursor()
-            
-            if is_first_chunk:
-                cursor.execute("DROP TABLE IF EXISTS data")
-                columns_def = ', '.join([f'"{col}" TEXT' for col in chunk.columns])
-                create_sql = f"CREATE TABLE data ({columns_def})"
-                cursor.execute(create_sql)
-            
-            placeholders = ', '.join(['?' for _ in chunk.columns])
-            column_names = ', '.join([f'"{col}"' for col in chunk.columns])
-            insert_sql = f"INSERT INTO data ({column_names}) VALUES ({placeholders})"
-            
-            for _, row in chunk.iterrows():
-                values = [str(val) if val is not None else '' for val in row.values]
-                cursor.execute(insert_sql, values)
-            
-            conn.commit()
-            return True
-            
-        except Exception as e:
-            print(f"Error in individual insert: {e}")
-            return False
-    
+       """Insert chunk using individual INSERT statements"""
+       try:
+           cursor = conn.cursor()
+           
+           if is_first_chunk:
+               cursor.execute("DROP TABLE IF EXISTS data")
+               columns_def = ', '.join([f'"{col}" TEXT' for col in chunk.columns])
+               create_sql = f"CREATE TABLE data ({columns_def})"
+               cursor.execute(create_sql)
+           
+           placeholders = ', '.join(['?' for _ in chunk.columns])
+           column_names = ', '.join([f'"{col}"' for col in chunk.columns])
+           insert_sql = f"INSERT INTO data ({column_names}) VALUES ({placeholders})"
+           
+           for _, row in chunk.iterrows():
+               values = [str(val) if val is not None else '' for val in row.values]
+               cursor.execute(insert_sql, values)
+           
+           conn.commit()
+           return True
+           
+       except Exception as e:
+           print(f"Error in individual insert: {e}")
+           return False
+   
     def _prepare_chunk_for_sqlite(self, chunk):
-        """Prepare chunk for SQLite"""
-        chunk = chunk.copy()
-        
-        for col in chunk.columns:
-            if pd.api.types.is_datetime64_any_dtype(chunk[col]):
-                chunk.loc[:, col] = chunk[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-            elif chunk[col].dtype == 'object':
-                chunk.loc[:, col] = chunk[col].apply(lambda x: 
-                    x.isoformat() if isinstance(x, (datetime, date, pd.Timestamp)) 
-                    else str(x) if x is not None else ''
-                )
-        
-        chunk = chunk.fillna('')
-        return chunk
-    
+       """Prepare chunk for SQLite"""
+       chunk = chunk.copy()
+       
+       for col in chunk.columns:
+           if pd.api.types.is_datetime64_any_dtype(chunk[col]):
+               chunk.loc[:, col] = chunk[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+           elif chunk[col].dtype == 'object':
+               chunk.loc[:, col] = chunk[col].apply(lambda x: 
+                   x.isoformat() if isinstance(x, (datetime, date, pd.Timestamp)) 
+                   else str(x) if x is not None else ''
+               )
+       
+       chunk = chunk.fillna('')
+       return chunk
+   
     def query_data_for_chat(self, question, chat_id):
-        """Process query for a specific chat's dataset"""
-        try:
-            if chat_id not in self.chat_datasets:
-                return {'success': False, 'error': 'No dataset loaded for this chat'}
-            
-            dataset_info = self.chat_datasets[chat_id]
-            print(f"Processing question for chat {chat_id}: {question}")
-            
-            # Generate SQL query
-            sql_query = self._generate_sql_query(question, dataset_info)
-            if not sql_query:
-                return {'success': False, 'error': 'Could not understand the question'}
-            
-            print(f"Generated SQL: {sql_query}")
-            
-            # Execute query
-            results = self._execute_sql_query(sql_query, dataset_info['sqlite_path'])
-            if results is None:
-                return {'success': False, 'error': 'Query execution failed'}
-            
-            # Generate response
-            response = self._generate_response(question, sql_query, results, dataset_info)
-            
-            # Prepare display results
-            display_results = self._prepare_display_results(results, question)
-            
-            return {
-                'success': True,
-                'answer': response,
-                'sql_query': sql_query,
-                'results': display_results,
-                'total_results': len(results),
-                'analysis_type': 'mcp_analysis',
-                'show_all_data': self._should_show_all_data(question, len(results))
-            }
-            
-        except Exception as e:
-            print(f"Error in query processing for chat {chat_id}: {e}")
-            traceback.print_exc()
-            return {'success': False, 'error': f'Analysis failed: {str(e)}'}
-    
+       """Process query for a specific chat's dataset with conversational AI"""
+       try:
+           if chat_id not in self.chat_datasets:
+               return {'success': False, 'error': 'No dataset loaded for this chat'}
+           
+           dataset_info = self.chat_datasets[chat_id]
+           dataset_context = dataset_info.get('context', {})
+           
+           print(f"Processing question for chat {chat_id}: {question}")
+           print(f"Dataset type: {dataset_context.get('type', 'general')}")
+           
+           # Generate SQL query
+           sql_query = self._generate_sql_query(question, dataset_info, dataset_context)
+           if not sql_query:
+               return {'success': False, 'error': 'Could not understand the question'}
+           
+           print(f"Generated SQL: {sql_query}")
+           
+           # Execute query
+           results = self._execute_sql_query(sql_query, dataset_info['sqlite_path'])
+           if results is None:
+               return {'success': False, 'error': 'Query execution failed'}
+           
+           # Generate conversational response
+           response = self.conversational_ai.generate_conversational_response(
+               question, results, dataset_info, sql_query, dataset_context
+           )
+           
+           # Prepare display results
+           display_results = self._prepare_display_results(results, question)
+           
+           # Determine analysis type based on question and dataset
+           analysis_type = self._determine_analysis_type(question, dataset_context)
+           
+           return {
+               'success': True,
+               'answer': response,
+               'sql_query': sql_query,
+               'results': display_results,
+               'total_results': len(results),
+               'analysis_type': analysis_type,
+               'dataset_type': dataset_context.get('type', 'general'),
+               'show_all_data': self._should_show_all_data(question, len(results))
+           }
+           
+       except Exception as e:
+           print(f"Error in query processing for chat {chat_id}: {e}")
+           traceback.print_exc()
+           return {'success': False, 'error': f'Analysis failed: {str(e)}'}
+   
+    def _determine_analysis_type(self, question, dataset_context):
+       """Determine the type of analysis based on question and context"""
+       question_lower = question.lower()
+       dataset_type = dataset_context.get('type', 'general')
+       
+       # Similarity-related keywords
+       similarity_keywords = ['similar', 'duplicate', 'matching', 'like', 'resembling']
+       if any(keyword in question_lower for keyword in similarity_keywords):
+           return 'similarity_analysis'
+       
+       # Trend analysis keywords
+       trend_keywords = ['trend', 'over time', 'monthly', 'quarterly', 'yearly', 'growth']
+       if any(keyword in question_lower for keyword in trend_keywords):
+           return 'trend_analysis'
+       
+       # Summary keywords
+       summary_keywords = ['summary', 'overview', 'total', 'count', 'average', 'sum']
+       if any(keyword in question_lower for keyword in summary_keywords):
+           return 'summary_analysis'
+       
+       # Dataset-specific analysis types
+       if dataset_type == 'jira':
+           if any(word in question_lower for word in ['bug', 'issue', 'ticket', 'priority']):
+               return 'jira_analysis'
+       elif dataset_type == 'sales':
+           if any(word in question_lower for word in ['revenue', 'sales', 'customer', 'product']):
+               return 'sales_analysis'
+       elif dataset_type == 'hr':
+           if any(word in question_lower for word in ['employee', 'salary', 'department', 'performance']):
+               return 'hr_analysis'
+       elif dataset_type == 'finance':
+           if any(word in question_lower for word in ['transaction', 'balance', 'expense', 'budget']):
+               return 'finance_analysis'
+       
+       return 'general_analysis'
+   
     def _prepare_display_results(self, results, question):
-        """Decide how many results to show based on question context"""
-        question_lower = question.lower()
-        
-        show_all_keywords = [
-            'all', 'complete', 'entire', 'full', 'every', 'total',
-            'show me all', 'give me all', 'list all', 'all data',
-            'complete data', 'entire dataset', 'everything'
-        ]
-        
-        limit_keywords = [
-            'top', 'first', 'sample', 'few', 'some', 'example'
-        ]
-        
-        wants_all_data = any(keyword in question_lower for keyword in show_all_keywords)
-        wants_limited = any(keyword in question_lower for keyword in limit_keywords)
-        
-        if wants_all_data and not wants_limited:
-            return results
-        elif len(results) <= 100:
-            return results
-        elif self._is_aggregated_query(results):
-            return results
-        else:
-            return results[:50]
-    
+       """Decide how many results to show based on question context"""
+       question_lower = question.lower()
+       
+       show_all_keywords = [
+           'all', 'complete', 'entire', 'full', 'every', 'total',
+           'show me all', 'give me all', 'list all', 'all data',
+           'complete data', 'entire dataset', 'everything'
+       ]
+       
+       limit_keywords = [
+           'top', 'first', 'sample', 'few', 'some', 'example'
+       ]
+       
+       wants_all_data = any(keyword in question_lower for keyword in show_all_keywords)
+       wants_limited = any(keyword in question_lower for keyword in limit_keywords)
+       
+       if wants_all_data and not wants_limited:
+           return results
+       elif len(results) <= 100:
+           return results
+       elif self._is_aggregated_query(results):
+           return results
+       else:
+           return results[:50]
+   
     def _is_aggregated_query(self, results):
-        """Check if results are aggregated"""
-        if not results:
-            return False
-        
-        first_result = results[0]
-        column_names = [col.lower() for col in first_result.keys()]
-        
-        aggregation_indicators = [
-            'count', 'sum', 'avg', 'average', 'min', 'max', 
-            'total', 'group', 'by'
-        ]
-        
-        return any(indicator in ' '.join(column_names) for indicator in aggregation_indicators)
-    
+       """Check if results are aggregated"""
+       if not results:
+           return False
+       
+       first_result = results[0]
+       column_names = [col.lower() for col in first_result.keys()]
+       
+       aggregation_indicators = [
+           'count', 'sum', 'avg', 'average', 'min', 'max', 
+           'total', 'group', 'by'
+       ]
+       
+       return any(indicator in ' '.join(column_names) for indicator in aggregation_indicators)
+   
     def _should_show_all_data(self, question, result_count):
-        """Determine if we should show all data in the UI"""
-        question_lower = question.lower()
-        
-        show_all_keywords = [
-            'all', 'complete', 'entire', 'full', 'every', 'total',
-            'show me all', 'give me all', 'list all'
-        ]
-        
-        return any(keyword in question_lower for keyword in show_all_keywords) or result_count <= 100
-    
-    def _generate_sql_query(self, question, dataset_info):
-        """Generate SQL query for the specific dataset"""
-        try:
-            schema_info = f"""
+       """Determine if we should show all data in the UI"""
+       question_lower = question.lower()
+       
+       show_all_keywords = [
+           'all', 'complete', 'entire', 'full', 'every', 'total',
+           'show me all', 'give me all', 'list all'
+       ]
+       
+       return any(keyword in question_lower for keyword in show_all_keywords) or result_count <= 100
+   
+    def _generate_sql_query(self, question, dataset_info, dataset_context):
+       """Generate SQL query with dataset context awareness"""
+       try:
+           dataset_type = dataset_context.get('type', 'general')
+           
+           schema_info = f"""
 Table: data
 Total rows: {dataset_info['total_rows']:,}
 Columns: {len(dataset_info['columns'])}
+Dataset Type: {dataset_type.upper()}
 
 Column mapping (original -> cleaned):
 """
-            for orig, cleaned in zip(dataset_info['columns'], dataset_info['cleaned_columns']):
-                dtype = dataset_info['dtypes'].get(orig, 'text')
-                schema_info += f"- '{orig}' -> {cleaned} ({dtype})\n"
-            
-            sample_data_str = safe_json_dumps(dataset_info['sample_data'][:3])
-            schema_info += f"\nSample data:\n{sample_data_str}"
-            
-            prompt = f"""
-You are an expert SQL query generator. Convert the natural language question to a SQLite query.
+           for orig, cleaned in zip(dataset_info['columns'], dataset_info['cleaned_columns']):
+               dtype = dataset_info['dtypes'].get(orig, 'text')
+               schema_info += f"- '{orig}' -> {cleaned} ({dtype})\n"
+           
+           sample_data_str = safe_json_dumps(dataset_info['sample_data'][:3])
+           schema_info += f"\nSample data:\n{sample_data_str}"
+           
+           # Add dataset-specific context
+           if dataset_type == 'jira':
+               context_hints = """
+JIRA CONTEXT HINTS:
+- Use "Status" for ticket status queries (Open, Closed, In Progress, etc.)
+- Use "Priority" for priority filtering (Critical, High, Medium, Low)
+- Use "Issue_Type" for bug/story/task filtering
+- Use "Summary" and "Description" for text-based searches
+- Use "Assignee" and "Reporter" for people queries
+- Use "Created" and "Updated" for date-based queries
+"""
+           elif dataset_type == 'sales':
+               context_hints = """
+SALES CONTEXT HINTS:
+- Look for revenue, amount, price columns for financial queries
+- Use customer, product columns for segmentation
+- Use date fields for trend analysis
+- Calculate totals, averages for performance metrics
+"""
+           elif dataset_type == 'hr':
+               context_hints = """
+HR CONTEXT HINTS:
+- Use salary, compensation columns for pay analysis
+- Use department, team columns for organization queries
+- Use performance, rating columns for evaluation analysis
+- Use hire_date, tenure for employment timeline queries
+"""
+           else:
+               context_hints = ""
+           
+           prompt = f"""
+You are an expert SQL query generator with deep understanding of {dataset_type.upper()} data. 
+Convert the natural language question to a SQLite query.
 
 DATABASE SCHEMA:
 {schema_info}
+
+{context_hints}
 
 IMPORTANT RULES:
 1. Use the cleaned column names (right side of mapping) in your SQL
 2. DO NOT add arbitrary LIMIT clauses unless the user specifically asks for "top N" or "first N"
 3. If user asks for "all data" or "show me all" - return ALL data without LIMIT
 4. Use appropriate aggregations (COUNT, SUM, AVG, etc.) when needed
-5. Handle text searches with LIKE and % wildcards
-6. Only add LIMIT if the user specifically requests a limited number of results
-7. Return only the SQL query, no explanations
-8. For context questions, use SELECT * FROM data to show all data
-9. Always wrap column names in double quotes like "column_name" for SQLite compatibility
+5. Handle text searches with LIKE and % wildcards for similarity searches
+6. For {dataset_type} queries, focus on domain-specific patterns and common use cases
+7. Only add LIMIT if the user specifically requests a limited number of results
+8. Return only the SQL query, no explanations
+9. For context questions, use SELECT * FROM data to show all data
+10. Always wrap column names in double quotes like "column_name" for SQLite compatibility
+11. For similarity queries, use multiple LIKE conditions with OR to catch variations
 
 USER QUESTION: {question}
 
 Generate SQLite query:
 """
 
-            response = self._call_gemini_api(prompt)
-            sql_query = self._extract_sql_from_response(response)
-            
-            return sql_query
-            
-        except Exception as e:
-            print(f"Error generating SQL: {e}")
-            return None
-    
+           response = self.conversational_ai._call_gemini_api(prompt)
+           sql_query = self._extract_sql_from_response(response)
+           
+           return sql_query
+           
+       except Exception as e:
+           print(f"Error generating SQL: {e}")
+           return None
+   
     def _extract_sql_from_response(self, response):
-        """Extract clean SQL from Gemini response"""
-        response = response.strip()
-        
-        if '```sql' in response:
-            response = response.split('```sql')[1].split('```')[0]
-        elif '```' in response:
-            response = response.split('```')[1]
-        
-        response = response.strip().rstrip(';')
-        
-        if not response.upper().startswith('SELECT'):
-            lines = response.split('\n')
-            for line in lines:
-                if line.strip().upper().startswith('SELECT'):
-                    response = line.strip()
-                    break
-        
-        return response
-    
+       """Extract clean SQL from Gemini response"""
+       response = response.strip()
+       
+       if '```sql' in response:
+           response = response.split('```sql')[1].split('```')[0]
+       elif '```' in response:
+           response = response.split('```')[1]
+       
+       response = response.strip().rstrip(';')
+       
+       if not response.upper().startswith('SELECT'):
+           lines = response.split('\n')
+           for line in lines:
+               if line.strip().upper().startswith('SELECT'):
+                   response = line.strip()
+                   break
+       
+       return response
+   
     def _execute_sql_query(self, sql_query, sqlite_path):
-        """Execute SQL query on chat-specific database"""
-        try:
-            forbidden_words = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'CREATE']
-            if any(word in sql_query.upper() for word in forbidden_words):
-                raise ValueError("Query contains forbidden operations")
-            
-            conn = sqlite3.connect(sqlite_path)
-            
-            conn.execute("PRAGMA temp_store = MEMORY")
-            conn.execute("PRAGMA cache_size = 10000")
-            
-            cursor = conn.cursor()
-            cursor.execute(sql_query)
-            
-            columns = [desc[0] for desc in cursor.description]
-            rows = cursor.fetchall()
-            
-            results = []
-            for row in rows:
-                result_dict = {}
-                for i, col in enumerate(columns):
-                    result_dict[col] = row[i]
-                results.append(result_dict)
-            
-            conn.close()
-            
-            print(f"Query executed successfully: {len(results)} results returned")
-            return results
-            
-        except Exception as e:
-            print(f"Error executing SQL: {e}")
-            return None
-    
-   
-    def _generate_response(self, question, sql_query, results, dataset_info):
-       """Generate response for the chat with enhanced similarity detection"""
+       """Execute SQL query on chat-specific database"""
        try:
-           result_count = len(results)
+           forbidden_words = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'CREATE']
+           if any(word in sql_query.upper() for word in forbidden_words):
+               raise ValueError("Query contains forbidden operations")
            
-           # Check if this is a similarity-related query
-           similarity_keywords = [
-               'similar', 'duplicate', 'duplicates', 'matching', 'match', 
-               'same', 'identical', 'comparable', 'related', 'like', 
-               'resembling', 'equivalent', 'parallel', 'analogous'
-           ]
+           conn = sqlite3.connect(sqlite_path)
            
-           is_similarity_query = any(keyword in question.lower() for keyword in similarity_keywords)
+           conn.execute("PRAGMA temp_store = MEMORY")
+           conn.execute("PRAGMA cache_size = 10000")
            
-           if result_count > 20:
-               results_for_ai = results[:10]
-           else:
-               results_for_ai = results
+           cursor = conn.cursor()
+           cursor.execute(sql_query)
            
-           results_json = safe_json_dumps(results_for_ai)
+           columns = [desc[0] for desc in cursor.description]
+           rows = cursor.fetchall()
            
-           if is_similarity_query:
-               # Enhanced prompt for similarity queries
-               prompt = f"""
-You are an expert data analyst specializing in similarity detection and pattern recognition. The user asked: "{question}"
-
-DATASET CONTEXT: You analyzed {result_count:,} total results from a dataset with {dataset_info['total_rows']:,} rows and {dataset_info['total_columns']} columns.
-
-SQL EXECUTED: {sql_query}
-SAMPLE RESULTS (first 10 of {result_count}): {results_json}
-
-Provide a comprehensive similarity analysis that includes:
-
-1. **SIMILARITY OVERVIEW**: Start with "I found {result_count:,} results for your similarity analysis..."
-
-2. **DUPLICATE DETECTION**: 
-  - Identify exact duplicates (identical values across key fields)
-  - Find near-duplicates (high similarity but not identical)
-  - Show percentage of duplicates found
-
-3. **SEMANTIC SIMILARITY**: 
-  - Group records by semantic meaning and context
-  - Identify records that are conceptually similar even with different wording
-  - Explain the similarity reasoning
-
-4. **PATTERN ANALYSIS**:
-  - Common patterns across similar records
-  - Key distinguishing features
-  - Anomalies or outliers
-
-5. **SIMILARITY SCORES**: 
-  - Provide similarity percentages where applicable
-  - Explain the basis for similarity calculations
-
-6. **ACTIONABLE INSIGHTS**:
-  - Data quality recommendations
-  - Potential cleanup suggestions
-  - Priority actions for handling duplicates
-
-7. **CATEGORIZATION**: Group similar items into logical categories
-
-The complete analysis data with all {result_count:,} results is available in the table below for detailed examination.
-
-Be specific, analytical, and provide concrete examples from the data.
-"""
-           else:
-               # Standard analysis prompt
-               prompt = f"""
-You are a data analyst explaining query results. The user asked: "{question}"
-
-IMPORTANT: You analyzed the COMPLETE dataset with {result_count:,} total results.
-
-SQL EXECUTED: {sql_query}
-SAMPLE RESULTS (first 10 of {result_count}): {results_json}
-
-Provide a comprehensive analysis that:
-1. States you found {result_count:,} total results
-2. Directly answers the user's question using the complete dataset
-3. Includes specific insights, patterns, and key statistics
-4. Mentions that the complete data is available in the table below
-5. Be conversational and insightful
-
-Start your response with: "I found {result_count:,} results for your query about..."
-
-Response:
-"""
-
-           response = self._call_gemini_api(prompt)
-           return response
+           results = []
+           for row in rows:
+               result_dict = {}
+               for i, col in enumerate(columns):
+                   result_dict[col] = row[i]
+               results.append(result_dict)
+           
+           conn.close()
+           
+           print(f"Query executed successfully: {len(results)} results returned")
+           return results
            
        except Exception as e:
-           print(f"Error generating response: {e}")
-           return f"Query executed successfully. Found {len(results):,} results in the dataset."
-   
-    def _call_gemini_api(self, prompt):
-       """Call Gemini API"""
-       headers = {'Content-Type': 'application/json'}
-       
-       data = {
-           'contents': [{'parts': [{'text': prompt}]}],
-           'generationConfig': {
-               'temperature': 0.1,
-               'topP': 0.8,
-               'topK': 40,
-               'maxOutputTokens': 2000,
-           }
-       }
-       
-       try:
-           response = requests.post(
-               f"{self.gemini_url}?key={self.gemini_api_key}",
-               headers=headers,
-               json=data,
-               timeout=30,
-               verify=False
-           )
-           
-           if response.status_code == 200:
-               result = response.json()
-               if 'candidates' in result and result['candidates']:
-                   return result['candidates'][0]['content']['parts'][0]['text']
-               else:
-                   raise Exception("No response from Gemini")
-           else:
-               raise Exception(f"Gemini API error: {response.status_code}")
-               
-       except Exception as e:
-           print(f"Gemini API error: {e}")
-           raise e
+           print(f"Error executing SQL: {e}")
+           return None
 
 # Global instances
 chat_processor = ChatMCPProcessor()
@@ -1713,17 +2131,55 @@ def init_db():
    conn.close()
 
 init_db()
-print("Chat-specific MCP processor initialized successfully!")
+print("Enhanced conversational AI processor initialized successfully!")
 
-# Install dependencies if not available
-try:
-   from bs4 import BeautifulSoup
-except ImportError:
-   print("Note: BeautifulSoup not available. Install with: pip install beautifulsoup4 lxml")
+
 
 @app.route('/')
 def index():
-   return render_template('index.html')
+    """API status endpoint - returns JSON instead of rendering template"""
+    return jsonify({
+        'status': 'success',
+        'message': 'AI Sheet Chat API is running',
+        'version': '2.0.0',
+        'features': [
+            'Conversational AI for any dataset',
+            'Auto-detection of dataset types (JIRA, Sales, HR, Finance)',
+            'Advanced similarity analysis',
+            'Natural language query processing',
+            'Multi-format file support (CSV, Excel, HTML, XML)',
+            'Real-time data visualization',
+            'Chat-based session management'
+        ],
+        'endpoints': {
+            'upload': '/upload',
+            'query': '/query',
+            'chat_new': '/chat/new',
+            'chat_status': '/chat/<chat_id>/status',
+            'similarity_analysis': '/api/similarity-analysis',
+            'chat_history': '/chat/history'
+        },
+        'supported_formats': ['CSV', 'XLSX', 'XLS', 'HTML', 'XML'],
+        'max_file_size': '10GB',
+        'ai_capabilities': {
+            'jira_analysis': 'Bug similarity detection, ticket trends, priority analysis',
+            'sales_analysis': 'Revenue trends, customer insights, product performance',
+            'hr_analysis': 'Employee analytics, salary analysis, performance tracking',
+            'finance_analysis': 'Transaction analysis, budget tracking, anomaly detection',
+            'general_analysis': 'Pattern recognition, data summarization, trend analysis'
+        }
+    })
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'uptime': 'Running'
+    })
+
+
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -1788,6 +2244,31 @@ def get_chat_status(chat_id):
    """Get dataset status for specific chat"""
    if chat_processor.has_dataset_for_chat(chat_id):
        dataset_info = chat_processor.get_chat_dataset_info(chat_id)
+       dataset_context = dataset_info.get('context', {})
+       
+       # Generate context-aware insights
+       base_insights = [
+           f"✅ Dataset loaded: {dataset_info['total_rows']:,} rows × {dataset_info['total_columns']} columns",
+           f"📊 File size: {dataset_info['file_size_formatted']}",
+           f"🗃️ SQLite database created for efficient querying"
+       ]
+       
+       # Add dataset-type specific insights
+       if dataset_context.get('type') != 'general':
+           dataset_type = dataset_context['type'].title()
+           confidence = dataset_context.get('confidence', 0)
+           base_insights.append(f"🎯 Detected as {dataset_type} dataset (confidence: {confidence:.0%})")
+           
+           # Add suggestions based on dataset type
+           suggestions = dataset_context.get('suggestions', [])
+           if suggestions:
+               base_insights.append(f"💡 Ready for {dataset_type.lower()}-specific analysis")
+       
+       base_insights.extend([
+           "🤖 Enhanced conversational AI ready",
+           "⚡ Handles any dataset size and complexity"
+       ])
+       
        return jsonify({
            'stage': 'complete',
            'progress': 100,
@@ -1798,15 +2279,11 @@ def get_chat_status(chat_id):
                'file_size_formatted': dataset_info['file_size_formatted'],
                'file_size_bytes': dataset_info['file_size_bytes'],
                'file_name': dataset_info.get('file_name', 'Unknown'),
-               'file_path': dataset_info.get('file_path', '')
+               'file_path': dataset_info.get('file_path', ''),
+               'dataset_type': dataset_context.get('type', 'general'),
+               'suggestions': dataset_context.get('suggestions', [])
            },
-           'insights': [
-               f"✅ Dataset loaded: {dataset_info['total_rows']:,} rows × {dataset_info['total_columns']} columns",
-               f"📊 File size: {dataset_info['file_size_formatted']}",
-               f"🗃️ SQLite database created for efficient querying",
-               f"🤖 Ready for natural language analysis",
-               f"⚡ Handles any dataset size and width"
-           ]
+           'insights': base_insights
        })
    else:
        return jsonify({
@@ -1840,6 +2317,8 @@ def get_chat_dataset_status(chat_id):
    try:
        if chat_processor.load_chat_dataset(chat_id):
            dataset_info = chat_processor.get_chat_dataset_info(chat_id)
+           dataset_context = dataset_info.get('context', {})
+           
            return jsonify({
                'has_dataset': True,
                'dataset_info': {
@@ -1849,7 +2328,9 @@ def get_chat_dataset_status(chat_id):
                    },
                    'columns': dataset_info['columns'],
                    'file_size_formatted': dataset_info.get('file_size_formatted', '0 B'),
-                   'file_name': dataset_info.get('file_name', 'Unknown')
+                   'file_name': dataset_info.get('file_name', 'Unknown'),
+                   'dataset_type': dataset_context.get('type', 'general'),
+                   'suggestions': dataset_context.get('suggestions', [])
                }
            })
        
@@ -1967,59 +2448,103 @@ def analyze_similarity():
 
 @app.route('/query', methods=['POST'])
 def process_query():
-   """Process user query for specific chat"""
-   data = request.get_json()
-   question = data.get('question', '').strip()
-   chat_id = data.get('chat_id')
-   
-   if not question:
-       return jsonify({'success': False, 'error': 'Please provide a question'})
-   
-   if not chat_id:
-       return jsonify({'success': False, 'error': 'Chat ID required'})
-   
-   # Load chat dataset if not in memory
-   if not chat_processor.load_chat_dataset(chat_id):
-       return jsonify({'success': False, 'error': 'No dataset loaded for this chat. Please upload a dataset first.'})
-   
-   print(f"Processing query for chat {chat_id}: {question}")
-   
-   # Process through chat-specific MCP
-   result = chat_processor.query_data_for_chat(question, chat_id)
-   
-   # Save to chat history if successful
-   if result.get('success') and chat_id:
-       try:
-           conn = sqlite3.connect('data/chat_history.db')
-           cursor = conn.cursor()
-           
-           # Save user message
-           cursor.execute('''
-               INSERT INTO messages (chat_id, type, content, timestamp)
-               VALUES (?, ?, ?, ?)
-           ''', (chat_id, 'user', question, datetime.now()))
-           
-           # Save assistant response
-           result_json = safe_json_dumps(result.get('results', []))
-           cursor.execute('''
-               INSERT INTO messages (chat_id, type, content, query, result, timestamp)
-               VALUES (?, ?, ?, ?, ?, ?)
-           ''', (chat_id, 'assistant', result['answer'], 
-                 result.get('sql_query'), result_json, datetime.now()))
-           
-           # Update chat title if it's the first real question
-           cursor.execute('''
-               UPDATE chats SET title = ?, updated_at = ?
-               WHERE id = ? AND title = 'New Analysis'
-           ''', (question[:50] + ('...' if len(question) > 50 else ''), datetime.now(), chat_id))
-           
-           conn.commit()
-           conn.close()
-           
-       except Exception as e:
-           print(f"Error saving to chat history: {e}")
-   
-   return jsonify(result)
+    """Process user query for specific chat with conversational AI"""
+    data = request.get_json()
+    question = data.get('question', '').strip()
+    chat_id = data.get('chat_id')
+    
+    if not question:
+        return jsonify({'success': False, 'error': 'Please provide a question'})
+    
+    if not chat_id:
+        return jsonify({'success': False, 'error': 'Chat ID required'})
+    
+    # Load chat dataset if not in memory
+    if not chat_processor.load_chat_dataset(chat_id):
+        return jsonify({'success': False, 'error': 'No dataset loaded for this chat. Please upload a dataset first.'})
+    
+    print(f"Processing conversational query for chat {chat_id}: {question}")
+    
+    try:
+        # Process through enhanced chat-specific MCP with conversational AI
+        result = chat_processor.query_data_for_chat(question, chat_id)
+        
+        # Save to chat history if successful
+        if result.get('success') and chat_id:
+            try:
+                conn = sqlite3.connect('data/chat_history.db')
+                cursor = conn.cursor()
+                
+                # Save user message
+                cursor.execute('''
+                    INSERT INTO messages (chat_id, type, content, timestamp)
+                    VALUES (?, ?, ?, ?)
+                ''', (chat_id, 'user', question, datetime.now()))
+                
+                # Save assistant response
+                result_json = safe_json_dumps(result.get('results', []))
+                cursor.execute('''
+                    INSERT INTO messages (chat_id, type, content, query, result, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (chat_id, 'assistant', result['answer'], 
+                      result.get('sql_query'), result_json, datetime.now()))
+                
+                # Update chat title if it's the first real question
+                cursor.execute('''
+                    UPDATE chats SET title = ?, updated_at = ?
+                    WHERE id = ? AND title = 'New Analysis'
+                ''', (question[:50] + ('...' if len(question) > 50 else ''), datetime.now(), chat_id))
+                
+                conn.commit()
+                conn.close()
+                
+            except Exception as e:
+                print(f"Error saving to chat history: {e}")
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        error_message = str(e)
+        print(f"Query processing error: {error_message}")
+        
+        # Handle specific API errors
+        if error_message.startswith('RATE_LIMIT_EXCEEDED:'):
+            return jsonify({
+                'success': False, 
+                'error': error_message.replace('RATE_LIMIT_EXCEEDED: ', ''),
+                'error_type': 'RATE_LIMIT_EXCEEDED',
+                'error_code': 429,
+                'user_message': 'API rate limit exceeded. Please wait a moment or contact your administrator to upgrade the API quota.'
+            })
+        elif error_message.startswith('GEMINI_API_ERROR:'):
+            return jsonify({
+                'success': False,
+                'error': error_message.replace('GEMINI_API_ERROR: ', ''),
+                'error_type': 'GEMINI_API_ERROR',
+                'user_message': 'There was an issue with the AI service. Please try again or contact support.'
+            })
+        elif error_message.startswith('GEMINI_API_TIMEOUT:'):
+            return jsonify({
+                'success': False,
+                'error': error_message.replace('GEMINI_API_TIMEOUT: ', ''),
+                'error_type': 'GEMINI_API_TIMEOUT',
+                'user_message': 'The AI service is taking too long to respond. Please try again.'
+            })
+        elif error_message.startswith('GEMINI_API_CONNECTION:'):
+            return jsonify({
+                'success': False,
+                'error': error_message.replace('GEMINI_API_CONNECTION: ', ''),
+                'error_type': 'GEMINI_API_CONNECTION',
+                'user_message': 'Cannot connect to AI service. Please check your internet connection.'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Analysis failed: {error_message}',
+                'error_type': 'GENERAL_ERROR',
+                'user_message': 'An unexpected error occurred. Please try again.'
+            })
+
 
 @app.route('/chat/history')
 def get_chat_history():
@@ -2128,5 +2653,5 @@ if __name__ == '__main__':
    debug = os.getenv('DEBUG', 'True').lower() == 'true'
    host = os.getenv('HOST', '0.0.0.0')
    
-   print(f"🚀 Starting Chat-specific MCP AI Sheet Chat on {host}:{port}")
+   print(f"🚀 Starting Enhanced Conversational AI Sheet Chat on {host}:{port}")
    app.run(debug=debug, host=host, port=port)

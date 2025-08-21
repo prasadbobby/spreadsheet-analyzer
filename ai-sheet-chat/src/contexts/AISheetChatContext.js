@@ -244,66 +244,121 @@ export const AISheetChatProvider = ({ children }) => {
     }
   }
 
-  const sendMessage = async (message) => {
-    if (!datasetLoaded || isProcessing || !message.trim() || !currentChatId) return
+const sendMessage = async (message) => {
+  if (!datasetLoaded || isProcessing || !message.trim() || !currentChatId) return
 
-    setIsProcessing(true)
-    
-    const userMessage = {
-      id: `user-${Date.now()}`,
-      type: 'user',
-      content: message.trim(),
-      timestamp: new Date().toISOString()
-    }
-    
-    setMessages(prev => [...prev, userMessage])
+  setIsProcessing(true)
+  
+  const userMessage = {
+    id: `user-${Date.now()}`,
+    type: 'user',
+    content: message.trim(),
+    timestamp: new Date().toISOString()
+  }
+  
+  setMessages(prev => [...prev, userMessage])
 
-    try {
-      const result = await apiService.sendQuery(message.trim(), currentChatId)
+  try {
+    const result = await apiService.sendQuery(message.trim(), currentChatId)
+    
+    if (result.success) {
+      const isVisualizationRequest = message.toLowerCase().includes('visualiz') || 
+                                   message.toLowerCase().includes('chart') || 
+                                   message.toLowerCase().includes('graph') || 
+                                   message.toLowerCase().includes('plot')
       
-      if (result.success) {
-        const isVisualizationRequest = message.toLowerCase().includes('visualiz') || 
-                                     message.toLowerCase().includes('chart') || 
-                                     message.toLowerCase().includes('graph') || 
-                                     message.toLowerCase().includes('plot')
-        
-        const assistantMessage = {
-          id: `assistant-${Date.now()}`,
-          type: 'assistant',
-          content: result.answer,
-          query: result.sql_query,
-          result: result.results,
-          analysisType: result.analysis_type || 'ai_analysis',
-          chartData: isVisualizationRequest ? generateChartData(result.results) : null,
-          timestamp: new Date().toISOString()
-        }
-        
-        setMessages(prev => [...prev, assistantMessage])
-        await loadChatHistory()
-      } else {
-        const errorMessage = {
-          id: `error-${Date.now()}`,
-          type: 'assistant',
-          content: result.error || 'I encountered an issue analyzing your data. Please try rephrasing your question.',
-          timestamp: new Date().toISOString()
-        }
-        
-        setMessages(prev => [...prev, errorMessage])
-      }
-    } catch (error) {
-      console.error('Query failed:', error)
-      const errorMessage = {
-        id: `error-${Date.now()}`,
+      const assistantMessage = {
+        id: `assistant-${Date.now()}`,
         type: 'assistant',
-        content: 'I encountered a technical issue. Please try again or rephrase your question.',
+        content: result.answer,
+        query: result.sql_query,
+        result: result.results,
+        analysisType: result.analysis_type || 'ai_analysis',
+        chartData: isVisualizationRequest ? generateChartData(result.results) : null,
         timestamp: new Date().toISOString()
       }
       
-      setMessages(prev => [...prev, errorMessage])
-    } finally {
-      setIsProcessing(false)
+      setMessages(prev => [...prev, assistantMessage])
+      await loadChatHistory()
+    } else {
+      // Handle specific error types
+      let errorMessage = result.error || 'I encountered an issue analyzing your data.'
+      let showSpecialError = false
+      
+      if (result.error_type === 'RATE_LIMIT_EXCEEDED') {
+        errorMessage = `🚫 **API Rate Limit Exceeded**
+
+${result.user_message}
+
+**What happened?**
+The Gemini AI service has reached its rate limit for your current API key.
+
+**Solutions:**
+1. **Wait and retry** - Rate limits reset after a few minutes
+2. **Upgrade API quota** - Contact your administrator to upgrade the Gemini API plan
+3. **Use a different API key** - If you have access to another API key with higher limits
+
+**Technical details:** ${result.error}`
+        showSpecialError = true
+        toast.error('API Rate Limit Exceeded - Please wait or upgrade quota')
+      } else if (result.error_type === 'GEMINI_API_ERROR') {
+        errorMessage = `⚠️ **AI Service Error**
+
+${result.user_message}
+
+**Technical details:** ${result.error}
+
+Please try again in a moment. If the issue persists, contact support.`
+        toast.error('AI Service Error - Please try again')
+      } else if (result.error_type === 'GEMINI_API_TIMEOUT') {
+        errorMessage = `⏱️ **Request Timeout**
+
+${result.user_message}
+
+The AI service is experiencing high load. Please try again.`
+        toast.error('Request timed out - Please try again')
+      } else if (result.error_type === 'GEMINI_API_CONNECTION') {
+        errorMessage = `🌐 **Connection Error**
+
+${result.user_message}
+
+Please check your internet connection and try again.`
+        toast.error('Connection error - Check internet connection')
+      } else {
+        toast.error('Analysis failed - Please try again')
+      }
+      
+      const errorMessageObj = {
+        id: `error-${Date.now()}`,
+        type: 'assistant',
+        content: errorMessage,
+        error_type: result.error_type,
+        timestamp: new Date().toISOString()
+      }
+      
+      setMessages(prev => [...prev, errorMessageObj])
     }
+  } catch (error) {
+    console.error('Query failed:', error)
+    const errorMessage = {
+      id: `error-${Date.now()}`,
+      type: 'assistant',
+      content: `🔧 **Technical Issue**
+
+I encountered a technical issue while processing your request.
+
+**Error:** ${error.message}
+
+Please try again or contact support if the issue persists.`,
+      timestamp: new Date().toISOString()
+    }
+    
+    setMessages(prev => [...prev, errorMessage])
+    toast.error('Technical error occurred')
+  } finally {
+    setIsProcessing(false)
   }
+}
 
   const generateChartData = (data) => {
     if (!data || !Array.isArray(data) || data.length === 0) return null

@@ -183,8 +183,7 @@
   background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
   box-shadow: 0 8px 25px -8px rgba(133, 0, 223, 0.3);
 }
-
-/* Custom dropdown styles */
+/* Enhanced dropdown z-index management */
 .custom-dropdown {
   position: relative;
 }
@@ -193,7 +192,7 @@
   position: absolute;
   top: 100%;
   right: 0;
-  z-index: 9999;
+  z-index: 9999 !important;
   min-width: 120px;
   background: white;
   border: 1px solid #e5e7eb;
@@ -230,18 +229,21 @@
   background-color: #fef2f2;
 }
 
-/* Ensure dropdown appears above other elements */
+/* Ensure sidebar chat items don't interfere with dropdowns */
 .chat-item {
   position: relative;
-  z-index: 1;
 }
 
-.chat-item:hover {
-  z-index: 2;
+.chat-item-dropdown {
+  z-index: 50 !important;
 }
 
-/* Override any conflicting z-index from scroll area */
-.custom-scrollbar {
+/* Override scroll area z-index when dropdown is open */
+.sidebar-scroll-area {
+  position: relative;
   z-index: auto;
 }
 
+.sidebar-scroll-area.dropdown-open {
+  z-index: 1;
+}
