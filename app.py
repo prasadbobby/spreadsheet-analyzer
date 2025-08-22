@@ -23,6 +23,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from collections import defaultdict, Counter
 import difflib
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+
 
 # Load environment variables
 load_dotenv()
@@ -2445,6 +2449,532 @@ def analyze_similarity():
        print(f"Similarity analysis error: {e}")
        traceback.print_exc()
        return jsonify({'success': False, 'error': str(e)})
+
+# Define stopwords locally to avoid NLTK dependency
+STOP_WORDS = {
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
+    'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 
+    'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should', 'could',
+    'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 
+    'they', 'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his', 'her',
+    'its', 'our', 'their', 'myself', 'yourself', 'himself', 'herself', 
+    'itself', 'ourselves', 'yourselves', 'themselves', 'what', 'which', 
+    'who', 'whom', 'whose', 'where', 'when', 'why', 'how', 'all', 'any', 
+    'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 
+    'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 
+    't', 'can', 'will', 'just', 'don', 'should', 'now'
+}
+
+# Enhanced keyword expansions for better similarity matching
+KEYWORD_EXPANSIONS = {
+    # Security terms
+    'buffer': ['buffer', 'overflow', 'underflow', 'memory', 'heap', 'stack'],
+    'overflow': ['overflow', 'buffer', 'heap', 'stack', 'memory', 'corruption'],
+    'string': ['string', 'format', 'input', 'validation', 'text', 'char'],
+    'security': ['security', 'vulnerability', 'exploit', 'cve', 'attack', 'breach'],
+    'sscanf': ['sscanf', 'scanf', 'sprintf', 'snprintf', 'format', 'string', 'buffer'],
+    'validation': ['validation', 'input', 'sanitization', 'check', 'verify', 'validate'],
+    'injection': ['injection', 'sql', 'xss', 'script', 'code', 'command'],
+    'memory': ['memory', 'heap', 'stack', 'buffer', 'corruption', 'leak', 'allocation'],
+    'crash': ['crash', 'segfault', 'fault', 'error', 'exception', 'abort', 'terminate'],
+    
+    # JIRA/Development terms
+    'bug': ['bug', 'defect', 'issue', 'problem', 'error', 'fault'],
+    'story': ['story', 'feature', 'requirement', 'epic', 'task'],
+    'critical': ['critical', 'urgent', 'high', 'severe', 'blocker'],
+    'performance': ['performance', 'slow', 'speed', 'optimization', 'latency'],
+    'login': ['login', 'authentication', 'auth', 'signin', 'access', 'credential'],
+    'timeout': ['timeout', 'delay', 'slow', 'hang', 'unresponsive'],
+    
+    # Technical terms
+    'api': ['api', 'service', 'endpoint', 'rest', 'http', 'request'],
+    'database': ['database', 'db', 'sql', 'query', 'table', 'data'],
+    'connection': ['connection', 'connect', 'network', 'socket', 'link'],
+    'configuration': ['configuration', 'config', 'setting', 'parameter', 'option'],
+    'deployment': ['deployment', 'deploy', 'release', 'build', 'publish'],
+}
+
+# Remove the NLTK download attempts - replace with this:
+print("Using local stopwords and keyword expansions for similarity analysis")
+
+# Add this new route for similarity queries
+@app.route('/similarity-query', methods=['POST'])
+def process_similarity_query():
+    """Process similarity-focused queries with enhanced matching"""
+    data = request.get_json()
+    question = data.get('question', '').strip()
+    chat_id = data.get('chat_id')
+    
+    if not question or not chat_id:
+        return jsonify({'success': False, 'error': 'Question and chat ID required'})
+    
+    if not chat_processor.load_chat_dataset(chat_id):
+        return jsonify({'success': False, 'error': 'No dataset loaded for this chat'})
+    
+    try:
+        print(f"Processing similarity query: {question}")
+        
+        # Extract the target content for similarity search
+        target_content = extract_similarity_target(question)
+        print(f"Extracted target content: {target_content}")
+        
+        # Perform enhanced similarity analysis
+        result = perform_enhanced_similarity_search(target_content, chat_id, question)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"Similarity query error: {e}")
+        traceback.print_exc()
+        return jsonify({
+            'success': False, 
+            'error': str(e),
+            'error_type': 'SIMILARITY_ERROR',
+            'user_message': 'Similarity analysis failed. Please try rephrasing your question.'
+        })
+
+def extract_similarity_target(question):
+    """Extract the target text/content to find similarities for"""
+    # Remove similarity trigger words
+    similarity_triggers = [
+        'find similar', 'show similar', 'give similar', 'similar to',
+        'like', 'resembling', 'tickets like', 'stories like', 'find stories similar',
+        'find tickets similar', 'similar stories', 'similar bugs', 'similar issues',
+        'tickets about', 'stories about', 'issues like', 'problems like',
+        'find', 'show', 'give', 'get'
+    ]
+    
+    cleaned_question = question.lower()
+    for trigger in similarity_triggers:
+        cleaned_question = cleaned_question.replace(trigger, '').strip()
+    
+    # Remove common JIRA terms to focus on the actual issue content
+    jira_terms = ['tickets', 'stories', 'issues', 'bugs', 'tasks', 'epics']
+    for term in jira_terms:
+        cleaned_question = cleaned_question.replace(term, '').strip()
+    
+    # Clean up extra whitespace and conjunctions
+    cleaned_question = re.sub(r'\s+', ' ', cleaned_question).strip()
+    
+    return cleaned_question
+
+def perform_enhanced_similarity_search(target_text, chat_id, original_question):
+    """Perform comprehensive similarity analysis"""
+    dataset_info = chat_processor.get_chat_dataset_info(chat_id)
+    
+    print(f"Starting similarity search for: '{target_text}'")
+    
+    try:
+        # Multi-strategy similarity search
+        semantic_results = find_semantic_matches(target_text, dataset_info)
+        keyword_results = find_enhanced_keyword_matches(target_text, dataset_info)
+        
+        # Combine results
+        all_results = combine_and_rank_results(semantic_results, keyword_results)
+        
+        # Generate intelligent response
+        response = generate_enhanced_similarity_response(target_text, all_results, dataset_info, original_question)
+        
+        return {
+            'success': True,
+            'answer': response,
+            'results': all_results,
+            'similarity_results': {
+                'semantic_matches': len(semantic_results),
+                'keyword_matches': len(keyword_results),
+                'total_matches': len(all_results)
+            },
+            'analysis_type': 'similarity_analysis',
+            'target_text': target_text,
+            'sql_query': f'Enhanced Similarity Search for: "{target_text}"'
+        }
+    except Exception as e:
+        print(f"Similarity search error: {e}")
+        traceback.print_exc()
+        raise e
+
+def find_semantic_matches(target_text, dataset_info):
+    """Find semantically similar content using TF-IDF and cosine similarity"""
+    try:
+        print("Finding semantic matches...")
+        sqlite_path = dataset_info['sqlite_path']
+        conn = sqlite3.connect(sqlite_path)
+        
+        # Get all records with combined text
+        query = '''
+        SELECT *, 
+               (COALESCE("Summary", "") || " " || COALESCE("Description", "")) as full_text
+        FROM data 
+        WHERE (COALESCE("Summary", "") || " " || COALESCE("Description", "")) != ""
+        AND LENGTH(TRIM(COALESCE("Summary", "") || " " || COALESCE("Description", ""))) > 10
+        '''
+        cursor = conn.cursor()
+        cursor.execute(query)
+        
+        columns = [desc[0] for desc in cursor.description]
+        rows = cursor.fetchall()
+        conn.close()
+        
+        if not rows:
+            print("No records found for semantic analysis")
+            return []
+        
+        # Prepare data
+        records = []
+        texts = [target_text]  # First text is the target
+        
+        for row in rows:
+            record = dict(zip(columns, row))
+            full_text = record.get('full_text', '').strip()
+            
+            if len(full_text) > 10:  # Only include records with substantial text
+                records.append(record)
+                texts.append(full_text)
+        
+        if len(texts) < 2:
+            print("Not enough text data for semantic analysis")
+            return []
+        
+        print(f"Analyzing {len(records)} records for semantic similarity")
+        
+        # TF-IDF vectorization with enhanced parameters
+        vectorizer = TfidfVectorizer(
+            max_features=1500,
+            stop_words=list(STOP_WORDS),  # Use our local stopwords
+            ngram_range=(1, 2),  # Include 1-2 word phrases
+            min_df=1,
+            max_df=0.95,
+            lowercase=True,
+            token_pattern=r'\b\w+\b'
+        )
+        
+        try:
+            tfidf_matrix = vectorizer.fit_transform(texts)
+            print(f"TF-IDF matrix shape: {tfidf_matrix.shape}")
+        except ValueError as e:
+            print(f"TF-IDF error: {e}")
+            return []
+        
+        # Calculate cosine similarity
+        similarity_scores = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
+        
+        # Get matches with similarity > 0.03 (lower threshold for more results)
+        results = []
+        for i, score in enumerate(similarity_scores):
+            if score > 0.03:  # Lowered threshold
+                record = records[i].copy()
+                record['similarity_score'] = float(score)
+                record['similarity_type'] = 'semantic'
+                results.append(record)
+        
+        # Sort by similarity score
+        results.sort(key=lambda x: x['similarity_score'], reverse=True)
+        
+        print(f"Found {len(results)} semantic matches")
+        return results[:15]  # Return top 15
+        
+    except Exception as e:
+        print(f"Semantic matching error: {e}")
+        traceback.print_exc()
+        return []
+
+def find_enhanced_keyword_matches(target_text, dataset_info):
+    """Find matches based on important keywords with expansion"""
+    try:
+        print("Finding keyword matches...")
+        
+        # Extract and expand keywords
+        keywords = extract_and_expand_keywords(target_text)
+        
+        if not keywords:
+            print("No keywords extracted")
+            return []
+        
+        print(f"Using keywords: {keywords}")
+        
+        sqlite_path = dataset_info['sqlite_path']
+        conn = sqlite3.connect(sqlite_path)
+        
+        # Build dynamic query for keyword matching
+        where_conditions = []
+        params = []
+        
+        for keyword in keywords:
+            # Search in multiple fields
+            condition = '''(
+                "Summary" LIKE ? OR 
+                COALESCE("Description", "") LIKE ? OR
+                COALESCE("Components", "") LIKE ? OR
+                COALESCE("Labels", "") LIKE ?
+            )'''
+            where_conditions.append(condition)
+            keyword_pattern = f'%{keyword}%'
+            params.extend([keyword_pattern] * 4)
+        
+        if not where_conditions:
+            return []
+        
+        query = f'''
+        SELECT *, 
+               (COALESCE("Summary", "") || " " || COALESCE("Description", "")) as full_text
+        FROM data 
+        WHERE {" OR ".join(where_conditions)}
+        LIMIT 50
+        '''
+        
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        
+        columns = [desc[0] for desc in cursor.description]
+        rows = cursor.fetchall()
+        conn.close()
+        
+        results = []
+        for row in rows:
+            record = dict(zip(columns, row))
+            # Calculate keyword match score
+            match_score = calculate_enhanced_keyword_score(target_text, record, keywords)
+            if match_score > 0:  # Only include records with some match
+                record['similarity_score'] = match_score
+                record['similarity_type'] = 'keyword'
+                results.append(record)
+        
+        # Sort by match score
+        results.sort(key=lambda x: x['similarity_score'], reverse=True)
+        
+        print(f"Found {len(results)} keyword matches")
+        return results[:15]  # Return top 15
+        
+    except Exception as e:
+        print(f"Keyword matching error: {e}")
+        traceback.print_exc()
+        return []
+
+def extract_and_expand_keywords(text):
+    """Extract and expand important keywords from text"""
+    try:
+        # Clean and tokenize
+        words = re.findall(r'\b\w+\b', text.lower())
+        
+        # Filter out stop words and short words
+        keywords = [word for word in words if len(word) > 2 and word not in STOP_WORDS]
+        
+        # Get unique keywords
+        unique_keywords = list(set(keywords))
+        
+        # Expand keywords using our expansion dictionary
+        expanded_keywords = set(unique_keywords)
+        for keyword in unique_keywords:
+            if keyword in KEYWORD_EXPANSIONS:
+                expanded_keywords.update(KEYWORD_EXPANSIONS[keyword])
+        
+        # Convert back to list and limit
+        final_keywords = list(expanded_keywords)[:12]  # Limit to 12 keywords
+        
+        return final_keywords
+        
+    except Exception as e:
+        print(f"Keyword extraction error: {e}")
+        return []
+
+def calculate_enhanced_keyword_score(target_text, record, keywords):
+    """Calculate enhanced keyword match score"""
+    try:
+        target_keywords = set(extract_and_expand_keywords(target_text))
+        
+        # Combine record text fields
+        record_text = " ".join([
+            str(record.get('Summary', '')),
+            str(record.get('Description', '')),
+            str(record.get('Components', '')),
+            str(record.get('Labels', ''))
+        ]).lower()
+        
+        record_keywords = set(extract_and_expand_keywords(record_text))
+        
+        if not target_keywords or not record_keywords:
+            return 0.0
+        
+        # Calculate Jaccard similarity
+        intersection = target_keywords & record_keywords
+        union = target_keywords | record_keywords
+        
+        jaccard_score = len(intersection) / len(union) if union else 0.0
+        
+        # Boost score for exact phrase matches
+        target_lower = target_text.lower()
+        phrase_boost = 0
+        
+        # Check for partial phrase matches in record
+        target_words = target_lower.split()
+        for i in range(len(target_words) - 1):
+            phrase = ' '.join(target_words[i:i+2])
+            if phrase in record_text:
+                phrase_boost += 0.15
+        
+        # Boost for exact keyword matches
+        exact_boost = 0
+        for keyword in target_keywords:
+            if keyword in record_text:
+                exact_boost += 0.1
+        
+        final_score = min(jaccard_score + phrase_boost + exact_boost, 1.0)
+        return final_score
+        
+    except Exception as e:
+        print(f"Score calculation error: {e}")
+        return 0.0
+
+def combine_and_rank_results(semantic_results, keyword_results):
+    """Combine and rank all similarity results"""
+    all_results = []
+    seen_keys = set()
+    
+    # Add semantic results first (higher priority)
+    for result in semantic_results:
+        key = result.get('Key', '')
+        summary = result.get('Summary', '')
+        unique_id = f"{key}-{summary}"
+        
+        if unique_id not in seen_keys:
+            seen_keys.add(unique_id)
+            result['combined_score'] = result['similarity_score'] * 1.3  # Boost semantic matches
+            all_results.append(result)
+    
+    # Add keyword results that aren't already included
+    for result in keyword_results:
+        key = result.get('Key', '')
+        summary = result.get('Summary', '')
+        unique_id = f"{key}-{summary}"
+        
+        if unique_id not in seen_keys:
+            seen_keys.add(unique_id)
+            result['combined_score'] = result['similarity_score']
+            all_results.append(result)
+    
+    # Sort by combined score
+    all_results.sort(key=lambda x: x.get('combined_score', 0), reverse=True)
+    
+    return all_results[:25]  # Return top 25 results
+
+def generate_enhanced_similarity_response(target_text, results, dataset_info, original_question):
+    """Generate intelligent response for similarity analysis"""
+    total_results = len(results)
+    
+    if total_results == 0:
+        return f"""🔍 **Enhanced Similarity Analysis**
+
+I searched comprehensively for content similar to: **"{target_text}"**
+
+**No similar tickets found.** This could indicate:
+
+1. **🆕 Unique Issue**: This might be a new type of problem not previously encountered
+2. **📝 Different Terminology**: Similar issues might be described using different technical terms
+3. **🎯 Specific Context**: The issue might be very specific to your current situation
+
+**💡 Suggestions to find related content:**
+- Try broader search terms (e.g., "security issue" instead of "buffer overflow")
+- Search for symptoms rather than technical terms (e.g., "application crashes" vs "segfault")
+- Look for error codes or specific error messages
+- Check if similar issues are categorized differently (Bugs vs Stories vs Tasks)
+
+Would you like me to search with different keywords or help you explore the dataset in another way?"""
+
+    # Analyze results for insights
+    semantic_count = len([r for r in results if r.get('similarity_type') == 'semantic'])
+    keyword_count = len([r for r in results if r.get('similarity_type') == 'keyword'])
+    
+    # Get distribution data
+    issue_types = {}
+    priorities = {}
+    statuses = {}
+    assignees = {}
+    
+    for result in results[:10]:  # Analyze top 10
+        issue_type = result.get('Issue_Type', 'Unknown')
+        priority = result.get('Priority', 'Unknown')
+        status = result.get('Status', 'Unknown')
+        assignee = result.get('Assignee', 'Unassigned')
+        
+        issue_types[issue_type] = issue_types.get(issue_type, 0) + 1
+        priorities[priority] = priorities.get(priority, 0) + 1
+        statuses[status] = statuses.get(status, 0) + 1
+        assignees[assignee] = assignees.get(assignee, 0) + 1
+    
+    response = f"""🔍 **Enhanced Similarity Analysis**
+
+I found **{total_results} tickets** with content similar to: **"{target_text}"**
+
+**🎯 Match Breakdown:**"""
+    
+    if semantic_count > 0:
+        response += f"""
+- 🧠 **{semantic_count} semantic matches** (content meaning & context similarity)"""
+    
+    if keyword_count > 0:
+        response += f"""
+- 🔍 **{keyword_count} keyword matches** (shared terminology & technical terms)"""
+    
+    if results:
+        top_match = results[0]
+        similarity_score = top_match.get('combined_score', top_match.get('similarity_score', 0))
+        
+        response += f"""
+
+**🏆 Highest Similarity Match:**
+- **Ticket:** {top_match.get('Key', 'N/A')}
+- **Summary:** {top_match.get('Summary', 'N/A')[:120]}{'...' if len(top_match.get('Summary', '')) > 120 else ''}
+- **Similarity Score:** {similarity_score:.1%}
+- **Type:** {top_match.get('Issue_Type', 'N/A')} | **Status:** {top_match.get('Status', 'N/A')} | **Priority:** {top_match.get('Priority', 'N/A')}"""
+    
+    # Add distribution insights
+    if issue_types:
+        most_common_type = max(issue_types.items(), key=lambda x: x[1])
+        response += f"""
+
+**📊 Pattern Analysis:**
+- **Most Common Type:** {most_common_type[0]} ({most_common_type[1]} tickets)"""
+        
+        if len(issue_types) > 1:
+            response += f" | **Distribution:** {', '.join([f'{k}({v})' for k, v in issue_types.items()])}"
+    
+    # Priority analysis
+    if priorities:
+        high_priority_terms = ['high', 'critical', 'urgent', 'blocker']
+        high_priority = sum(v for k, v in priorities.items() 
+                          if any(term in k.lower() for term in high_priority_terms))
+        if high_priority > 0:
+            response += f"""
+- **⚠️ High Priority Issues:** {high_priority} out of {total_results} need urgent attention"""
+    
+    # Status analysis
+    if statuses:
+        open_terms = ['open', 'in progress', 'new', 'assigned', 'reopened']
+        open_issues = sum(v for k, v in statuses.items() 
+                         if any(term in k.lower() for term in open_terms))
+        if open_issues > 0:
+            response += f"""
+- **🔓 Active Issues:** {open_issues} tickets are still open/in progress"""
+    
+    # Assignee analysis
+    if assignees:
+        assigned_count = sum(v for k, v in assignees.items() if k.lower() not in ['unassigned', 'unknown', ''])
+        if assigned_count > 0:
+            response += f"""
+- **👥 Assignment Status:** {assigned_count} tickets have assignees"""
+    
+    response += f"""
+
+**💡 Key Insights:**
+- Found similar issues across {len(issue_types)} different issue types, indicating this is a recognized problem area
+- Results ranked by advanced similarity scoring (semantic + keyword + phrase matching)
+- Each result includes similarity score and full ticket details for context
+- Pattern suggests {"this is a recurring issue" if total_results > 5 else "this type of issue occurs occasionally"}
+
+**📋 Detailed Results:**
+All similar tickets are displayed in the table below, sorted by relevance score. Use these to understand patterns, find solutions, or identify related work."""
+    
+    return response
 
 @app.route('/query', methods=['POST'])
 def process_query():

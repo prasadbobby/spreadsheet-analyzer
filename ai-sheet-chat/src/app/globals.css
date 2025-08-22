@@ -247,3 +247,33 @@
 .sidebar-scroll-area.dropdown-open {
   z-index: 1;
 }
+/* Export-specific styles */
+@media print {
+  .main-content-area {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  
+  .scroll-area {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  
+  .custom-scrollbar {
+    overflow: visible !important;
+  }
+}
+
+/* Ensure full content is captured for screenshots */
+.export-ready {
+  height: auto !important;
+  overflow: visible !important;
+}
+
+.export-ready .scroll-area,
+.export-ready [data-scroll-area] {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}

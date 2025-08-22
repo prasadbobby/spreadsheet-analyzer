@@ -157,6 +157,26 @@ class APIService {
 
    return await response.json()
  }
+
+ // Add to apiService.js
+async sendSimilarityQuery(question, chatId) {
+    const response = await fetch(`${API_BASE_URL}/similarity-query`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        question,
+        chat_id: chatId
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    return await response.json()
+  }
 }
 
 export const apiService = new APIService()

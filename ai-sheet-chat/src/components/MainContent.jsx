@@ -46,6 +46,8 @@ import WelcomeScreen from "@/components/WelcomeScreen";
 import OptimizedDataTable from "./OptimizedDataTable";
 import ChartVisualization from "@/components/ChartVisualization";
 import ClearSessionDialog from "@/components/ClearSessionDialog";
+import ExportSessionDialog from "@/components/ExportSessionDialog";
+import { exportUtils } from "@/lib/exportUtils";
 
 // Memoized components to prevent unnecessary re-renders
 const MemoizedDataTable = React.memo(OptimizedDataTable);
@@ -58,6 +60,7 @@ export default function MainContent() {
     isProcessing,
     messages,
     sendMessage,
+    sendSimilarityQuery, // Add this new function
     clearChat,
     datasetInfo,
   } = useAISheetChat();
@@ -66,10 +69,27 @@ export default function MainContent() {
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
 
   // Debounced input to reduce re-renders
   const [debouncedInputMessage, setDebouncedInputMessage] = useState("");
   const debounceTimeoutRef = useRef(null);
+
+
+ // Enhanced similarity detection
+  const detectSimilarityQuery = useCallback((question) => {
+    const similarityKeywords = [
+      'similar', 'like', 'resembling', 'comparable', 'related to',
+      'find tickets like', 'show similar', 'tickets similar to',
+      'same as', 'equivalent to', 'matching', 'find stories similar',
+      'give similar', 'similar stories', 'similar bugs', 'similar issues',
+      'tickets about', 'stories about', 'issues like', 'problems like'
+    ];
+    
+    return similarityKeywords.some(keyword => 
+      question.toLowerCase().includes(keyword.toLowerCase())
+    );
+  }, []);
 
   // Optimized scroll function with throttling
   const scrollToBottom = useCallback(() => {
@@ -80,6 +100,8 @@ export default function MainContent() {
       });
     }
   }, []);
+
+
 
   // Throttled scroll effect
   useEffect(() => {
@@ -95,7 +117,7 @@ export default function MainContent() {
 
     debounceTimeoutRef.current = setTimeout(() => {
       setDebouncedInputMessage(inputMessage);
-    }, 150); // 150ms debounce
+    }, 150);
 
     return () => {
       if (debounceTimeoutRef.current) {
@@ -104,6 +126,7 @@ export default function MainContent() {
     };
   }, [inputMessage]);
 
+// Enhanced send handler with similarity detection
   const handleSend = useCallback(async () => {
     if (
       inputMessage.trim() &&
@@ -118,11 +141,20 @@ export default function MainContent() {
         textareaRef.current.style.height = "auto";
       }
 
-      await sendMessage(message);
+      // Detect if this is a similarity query
+      const isSimilarityQuery = detectSimilarityQuery(message);
+      
+      if (isSimilarityQuery) {
+        // Use similarity search
+        await sendSimilarityQuery(message);
+      } else {
+        // Use normal query
+        await sendMessage(message);
+      }
     }
-  }, [inputMessage, isProcessing, datasetLoaded, currentChatId, sendMessage]);
+  }, [inputMessage, isProcessing, datasetLoaded, currentChatId, sendMessage, sendSimilarityQuery, detectSimilarityQuery]);
 
-  const handleKeyDown = useCallback(
+   const handleKeyDown = useCallback(
     (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -141,11 +173,10 @@ export default function MainContent() {
     }
   }, []);
 
-  // Throttled input change handler
+   // Throttled input change handler
   const handleInputChange = useCallback(
     (e) => {
       setInputMessage(e.target.value);
-      // Throttle auto-resize
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
       }
@@ -169,9 +200,25 @@ export default function MainContent() {
     clearChat();
   }, [clearChat]);
 
-  // Enhanced quick actions based on dataset type
+// Export handler
+  const handleExport = useCallback(async (exportType) => {
+    try {
+      if (exportType === 'pdf') {
+        await exportUtils.exportAsPDF('main-chat-content');
+        toast.success('Chat session exported as PDF successfully!');
+      } else if (exportType === 'image') {
+        await exportUtils.exportAsImage('main-chat-content');
+        toast.success('Chat session exported as image successfully!');
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
+      toast.error('Export failed. Please try again.');
+    }
+  }, []);
+
+
+// Enhanced quick actions based on dataset type
 const quickActions = useMemo(() => {
-  // Get dataset type from context if available
   const datasetType = datasetInfo?.dataset_type || datasetInfo?.context?.type || 'general';
   
   if (datasetType === 'jira') {
@@ -179,7 +226,7 @@ const quickActions = useMemo(() => {
       {
         icon: Search,
         label: "Similar Bugs",
-        message: "Find tickets with similar error messages or symptoms to a specific issue",
+        message: "Find stories similar to buffer overflow security issues",
         color: "bg-red-50 text-red-700 border-red-200 hover:bg-red-100",
       },
       {
@@ -201,113 +248,13 @@ const quickActions = useMemo(() => {
         color: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100",
       },
       {
-        icon: CheckCircle,
-        label: "Resolved",
-        message: "Analyze resolved tickets and patterns",
+        icon: GitMerge,
+        label: "Similar Issues",
+        message: "Find tickets similar to string security vulnerabilities",
         color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
-      },
-    ];
-  } else if (datasetType === 'sales') {
-    return [
-      {
-        icon: DollarSign,
-        label: "Revenue",
-        message: "Show revenue trends and top products",
-        color: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100",
-      },
-      {
-        icon: Users,
-        label: "Customers",
-        message: "Analyze customer behavior and top clients",
-        color: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
-      },
-      {
-        icon: TrendingUp,
-        label: "Trends",
-        message: "Analyze sales performance over time",
-        color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
-      },
-      {
-        icon: BarChart3,
-        label: "Products",
-        message: "Show product performance rankings",
-        color: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
-      },
-      {
-        icon: Target,
-        label: "Regions",
-        message: "Compare performance across regions",
-        color: "bg-red-50 text-red-700 border-red-200 hover:bg-red-100",
-      },
-    ];
-  } else if (datasetType === 'hr') {
-    return [
-      {
-        icon: Users,
-        label: "Teams",
-        message: "Analyze team and department distributions",
-        color: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
-      },
-      {
-        icon: DollarSign,
-        label: "Salary",
-        message: "Analyze salary by department and role",
-        color: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100",
-      },
-      {
-        icon: TrendingUp,
-        label: "Performance",
-        message: "Analyze performance ratings and trends",
-        color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
-      },
-      {
-        icon: Clock,
-        label: "Tenure",
-        message: "Analyze employee tenure and retention",
-        color: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
-      },
-      {
-        icon: Activity,
-        label: "Skills",
-        message: "Identify skills and training needs",
-        color: "bg-red-50 text-red-700 border-red-200 hover:bg-red-100",
-      },
-    ];
-  } else if (datasetType === 'finance') {
-    return [
-      {
-        icon: DollarSign,
-        label: "Transactions",
-        message: "Analyze transaction patterns and trends",
-        color: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100",
-      },
-      {
-        icon: TrendingUp,
-        label: "Budget",
-        message: "Compare budget vs actual expenses",
-        color: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
-      },
-      {
-        icon: AlertTriangle,
-        label: "Anomalies",
-        message: "Find unusual transactions or outliers",
-        color: "bg-red-50 text-red-700 border-red-200 hover:bg-red-100",
-      },
-      {
-        icon: BarChart3,
-        label: "Categories",
-        message: "Analyze expenses by category",
-        color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
-      },
-      {
-        icon: Clock,
-        label: "Cash Flow",
-        message: "Analyze payment timing and flow",
-        color: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
       },
     ];
   } else {
-    // General dataset actions
     return [
       {
         icon: Eye,
@@ -456,7 +403,9 @@ const copyToClipboard = useCallback((text) => {
     copyToClipboard,
   ]);
 
-  // Show welcome screen if no current chat
+
+
+    // Show welcome screen if no current chat
   if (!currentChatId) {
     return (
       <div className="flex-1 flex flex-col bg-gray-50 min-h-0">
@@ -501,7 +450,7 @@ const copyToClipboard = useCallback((text) => {
 
   return (
     <>
-      <div className="flex-1 flex flex-col bg-gray-50 min-h-0">
+      <div className="flex-1 flex flex-col bg-gray-50 min-h-0" id="main-chat-content">
         {/* Header - Match Sidebar Height */}
         <div className="border-b border-gray-200 bg-white shadow-sm flex-shrink-0 h-[120px] flex items-center">
           <div className="p-6 w-full">
@@ -535,6 +484,8 @@ const copyToClipboard = useCallback((text) => {
                 <Button
                   variant="outline"
                   size="sm"
+                  onClick={() => setExportDialogOpen(true)}
+                  disabled={isProcessing || messages.length === 0}
                   className="shadow-sm hover:shadow-md"
                 >
                   <Download className="h-4 w-4 mr-2" />
@@ -706,11 +657,17 @@ const copyToClipboard = useCallback((text) => {
         </div>
       </div>
 
-      {/* Clear Session Dialog */}
+     {/* Dialogs */}
       <ClearSessionDialog
         open={clearDialogOpen}
         onOpenChange={setClearDialogOpen}
         onConfirm={handleClearSession}
+      />
+
+      <ExportSessionDialog
+        open={exportDialogOpen}
+        onOpenChange={setExportDialogOpen}
+        onExport={handleExport}
       />
     </>
   );

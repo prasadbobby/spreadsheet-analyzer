@@ -419,6 +419,74 @@ Please try again or contact support if the issue persists.`,
     }
   }
 
+    // Add new function for similarity queries
+  const sendSimilarityQuery = async (message) => {
+    if (!datasetLoaded || isProcessing || !message.trim() || !currentChatId) return
+
+    setIsProcessing(true)
+    
+    const userMessage = {
+      id: `user-${Date.now()}`,
+      type: 'user',
+      content: message.trim(),
+      timestamp: new Date().toISOString()
+    }
+    
+    setMessages(prev => [...prev, userMessage])
+
+    try {
+      const result = await apiService.sendSimilarityQuery(message.trim(), currentChatId)
+      
+      if (result.success) {
+        const assistantMessage = {
+          id: `assistant-${Date.now()}`,
+          type: 'assistant',
+          content: result.answer,
+          query: result.sql_query || 'Similarity Analysis Performed',
+          result: result.results,
+          analysisType: 'similarity_analysis',
+          similarity_results: result.similarity_results,
+          similarity_score: result.similarity_score,
+          timestamp: new Date().toISOString()
+        }
+        
+        setMessages(prev => [...prev, assistantMessage])
+        await loadChatHistory()
+      } else {
+        // Handle errors same as regular sendMessage
+        let errorMessage = result.error || 'I encountered an issue analyzing similarities in your data.'
+        
+        if (result.error_type === 'RATE_LIMIT_EXCEEDED') {
+          errorMessage = `🚫 **API Rate Limit Exceeded**\n\n${result.user_message}\n\n**Solutions:**\n1. Wait and retry\n2. Upgrade API quota\n3. Use different API key`
+          toast.error('API Rate Limit Exceeded')
+        }
+        
+        const errorMessageObj = {
+          id: `error-${Date.now()}`,
+          type: 'assistant',
+          content: errorMessage,
+          error_type: result.error_type,
+          timestamp: new Date().toISOString()
+        }
+        
+        setMessages(prev => [...prev, errorMessageObj])
+      }
+    } catch (error) {
+      console.error('Similarity query failed:', error)
+      const errorMessage = {
+        id: `error-${Date.now()}`,
+        type: 'assistant',
+        content: `🔧 **Technical Issue**\n\nI encountered a technical issue while processing your similarity request.\n\n**Error:** ${error.message}`,
+        timestamp: new Date().toISOString()
+      }
+      
+      setMessages(prev => [...prev, errorMessage])
+      toast.error('Similarity analysis failed')
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
   const value = {
     currentChatId,
     datasetLoaded,
@@ -438,8 +506,11 @@ Please try again or contact support if the issue persists.`,
     uploadFile,
     sendMessage,
     clearChat,
-    setMessages
+    setMessages,
+    sendSimilarityQuery,
   }
+
+
 
   return (
     <AISheetChatContext.Provider value={value}>
