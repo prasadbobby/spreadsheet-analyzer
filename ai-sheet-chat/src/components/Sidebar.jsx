@@ -21,14 +21,21 @@ import {
   PieChart,
   Activity,
   Edit2,
-  MoreVertical
+  MoreVertical,
+  History,
+  Menu,
+  X,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
 import { useAISheetChat } from '@/contexts/AISheetChatContext'
+import { useSidebarContext } from '@/contexts/SidebarContext'
 import { formatTime } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import DeleteChatDialog from '@/components/DeleteChatDialog'
 import RenameChatDialog from '@/components/RenameChatDialog'
+import RecentChatsModal from '@/components/RecentChatsModal'
 
 export default function Sidebar() {
   const {
@@ -46,12 +53,15 @@ export default function Sidebar() {
     uploadFile
   } = useAISheetChat()
 
+  const { isCollapsed, isMobile, toggleSidebar, closeSidebar } = useSidebarContext()
+
   // Dialog states
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [chatToDelete, setChatToDelete] = useState(null)
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
   const [chatToRename, setChatToRename] = useState(null)
   const [openDropdownId, setOpenDropdownId] = useState(null)
+  const [recentChatsModalOpen, setRecentChatsModalOpen] = useState(false)
 
   const onDrop = useCallback((acceptedFiles, rejectedFiles) => {
     if (rejectedFiles.length > 0) {
@@ -74,11 +84,14 @@ export default function Sidebar() {
     maxSize: 10 * 1024 * 1024 * 1024,
   })
 
-  // Dropdown handlers
-  const toggleDropdown = (chatId, event) => {
+  // Get current chat
+  const currentChat = chats.find(chat => chat.id === currentChatId)
+
+  // Dropdown handlers for current chat
+  const toggleDropdown = (event) => {
     event.preventDefault()
     event.stopPropagation()
-    setOpenDropdownId(openDropdownId === chatId ? null : chatId)
+    setOpenDropdownId(openDropdownId === currentChatId ? null : currentChatId)
   }
 
   const closeDropdown = () => {
@@ -86,12 +99,22 @@ export default function Sidebar() {
   }
 
   // Delete handlers
-  const handleDeleteClick = (chat, event) => {
+  const handleDeleteClick = (event) => {
     event.preventDefault()
     event.stopPropagation()
-    setChatToDelete(chat)
-    setDeleteDialogOpen(true)
-    closeDropdown()
+    if (currentChat) {
+      setChatToDelete(currentChat)
+      setDeleteDialogOpen(true)
+      closeDropdown()
+    }
+  }
+
+  const handleDeleteFromModal = (chatId, chatTitle) => {
+    const chat = chats.find(c => c.id === chatId)
+    if (chat) {
+      setChatToDelete({ id: chatId, title: chatTitle })
+      setDeleteDialogOpen(true)
+    }
   }
 
   const handleDeleteConfirm = async () => {
@@ -112,12 +135,19 @@ export default function Sidebar() {
   }
 
   // Rename handlers
-  const handleRenameClick = (chat, event) => {
+  const handleRenameClick = (event) => {
     event.preventDefault()
     event.stopPropagation()
-    setChatToRename(chat)
+    if (currentChat) {
+      setChatToRename(currentChat)
+      setRenameDialogOpen(true)
+      closeDropdown()
+    }
+  }
+
+  const handleRenameFromModal = (chatId, currentTitle) => {
+    setChatToRename({ id: chatId, title: currentTitle })
     setRenameDialogOpen(true)
-    closeDropdown()
   }
 
   const handleRenameConfirm = async (newTitle) => {
@@ -189,308 +219,424 @@ export default function Sidebar() {
     }
   }, [openDropdownId])
 
+  // Sidebar width calculation
+  const sidebarWidth = isCollapsed ? 'w-16' : 'w-80'
+
   return (
     <>
-      <div className="w-80 bg-card border-r border-border flex flex-col h-full shadow-sm relative">
-        {/* Header - Fixed Height to Match Navbar */}
-        <div className="h-[120px] flex flex-col justify-center p-6" style={{ backgroundColor: '#8500df', color: 'white' }}>
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
-              <Brain className="h-6 w-6" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold">AI Sheet Chat</h1>
-            </div>
-          </div>
-          
-          <Button 
-            onClick={createNewChat}
-            className="w-full bg-white/20 hover:bg-white/30 text-white border-white/20 backdrop-blur-sm font-medium"
-            variant="outline"
-            disabled={isUploading}
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            New Analysis Session
-          </Button>
-        </div>
+      {/* Mobile Overlay */}
+      {isMobile && !isCollapsed && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40"
+          onClick={closeSidebar}
+        />
+      )}
 
-        {/* Upload Section */}
-        <div className="p-6 border-b border-border">
-          <div className="flex items-center gap-2 mb-4">
-            <Upload className="h-4 w-4 text-gray-600" />
-            <h3 className="text-sm font-semibold text-gray-800">Data Upload</h3>
-            {!currentChatId && (
-              <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-700">
-                Select chat first
-              </Badge>
-            )}
-          </div>
-          
-          <div
-            {...getRootProps()}
-            className={cn(
-              "border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all",
-              "hover:border-primary hover:bg-primary/5",
-              isDragActive && !isDragReject && "border-primary bg-primary/5",
-              isDragReject && "border-red-300 bg-red-50",
-              (isUploading || !currentChatId) && "opacity-60 cursor-not-allowed",
-              uploadError && "border-red-300 bg-red-50"
-            )}
-          >
-            <input 
-              {...getInputProps()} 
-              onChange={handleFileInputChange}
-              disabled={isUploading || !currentChatId}
-            />
-            
-            <div className="relative z-10">
-              {!currentChatId ? (
-                <div className="space-y-2">
-                  <MessageSquare className="h-8 w-8 mx-auto text-gray-400" />
-                  <div className="text-sm font-medium text-gray-700">Create or select a chat first</div>
-                  <div className="text-xs text-gray-500">Then upload your data file</div>
-                </div>
-              ) : isUploading ? (
-                <div className="space-y-3">
-                  <Database className="h-8 w-8 mx-auto text-purple-600 animate-pulse" />
-                  <div className="text-sm font-medium text-gray-700">Processing your file...</div>
-                  <Progress value={progress} className="h-2" />
-                  <div className="text-xs text-gray-500">{progress}% complete</div>
-                </div>
-              ) : uploadError ? (
-                <div className="space-y-2">
-                  <AlertCircle className="h-8 w-8 mx-auto text-red-500" />
-                  <div className="text-sm font-medium text-red-700">Upload failed</div>
-                  <div className="text-xs text-red-500">{uploadError}</div>
-                </div>
-              ) : datasetLoaded ? (
-                <div className="space-y-2">
-                  <CheckCircle className="h-8 w-8 mx-auto text-green-500" />
-                  <div className="text-sm font-medium text-green-700">Dataset ready for this chat</div>
-                  <div className="text-xs text-green-600">Click to upload new data</div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Upload className="h-8 w-8 mx-auto text-gray-400" />
-                  <div className="text-sm font-medium text-gray-700">
-                    {isDragActive ? 'Drop your file here' : 'Drop files or click to browse'}
-                  </div>
-                  <div className="text-xs text-gray-500">CSV, Excel files up to 10GB</div>
-                </div>
-              )}
-            </div>
-          </div>
+      {/* Sidebar */}
+      <div className={cn(
+        "bg-card border-r border-border flex flex-col h-full shadow-sm relative transition-all duration-300 ease-in-out z-50",
+        sidebarWidth
+      )}>
+        
+        {/* Collapse Toggle Button - KEEP THIS RELATIVE TO SIDEBAR */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={toggleSidebar}
+          className={cn(
+            "absolute -right-3 top-4 z-10 h-6 w-6 rounded-full border bg-white shadow-md hover:shadow-lg transition-all",
+            "flex items-center justify-center p-0"
+          )}
+        >
+          {isCollapsed ? (
+            <ChevronRight className="h-4 w-4" />
+          ) : (
+            <ChevronLeft className="h-4 w-4" />
+          )}
+        </Button>
 
-          {/* Dataset Stats */}
-          {datasetLoaded && datasetInfo && (
-            <Card className="mt-4 border-0 shadow-sm" style={{ background: 'linear-gradient(135deg, #f5e7ff 0%, #e8d5ff 100%)' }}>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <PieChart className="h-4 w-4 text-purple-600" />
-                  <span className="text-sm font-semibold text-gray-800">Dataset Overview</span>
-                  <Badge variant="secondary" className="text-xs bg-green-100 text-green-800 ml-auto">
-                    Active
-                  </Badge>
+        {/* Header */}
+        <div 
+          className={cn(
+            "flex flex-col justify-center transition-all duration-300",
+            isCollapsed ? "h-16 p-3" : "h-[120px] p-6"
+          )} 
+          style={{ backgroundColor: '#8500df', color: 'white' }}
+        >
+          {isCollapsed ? (
+            // Collapsed Header
+            <div className="flex items-center justify-center">
+              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                <Brain className="h-6 w-6" />
+              </div>
+            </div>
+          ) : (
+            // Full Header
+            <>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center backdrop-blur-sm">
+                  <Brain className="h-6 w-6" />
                 </div>
-                
-                <div className="grid grid-cols-1 gap-3">
-                  {getDatasetStats().map((stat, index) => (
-                    <div key={index} className="flex items-center justify-between p-2 bg-white/70 rounded-lg backdrop-blur-sm">
-                      <div className="flex items-center gap-2">
-                        <stat.icon className="h-3 w-3 text-purple-600" />
-                        <span className="text-xs text-gray-600">{stat.label}</span>
-                      </div>
-                      <Badge variant="secondary" className="text-xs font-medium bg-white/80">
-                        {stat.value}
-                      </Badge>
-                    </div>
-                  ))}
+                <div>
+                  <h1 className="text-xl font-bold">AI Sheet Chat</h1>
                 </div>
-                
-                <div className="mt-3 p-2 bg-green-100 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <Activity className="h-3 w-3 text-green-600" />
-                    <span className="text-xs font-medium text-green-800">Ready for Analysis</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+              </div>
+              
+              <Button 
+                onClick={createNewChat}
+                className="w-full bg-white/20 hover:bg-white/30 text-white border-white/20 backdrop-blur-sm font-medium"
+                variant="outline"
+                disabled={isUploading}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                New Analysis Session
+              </Button>
+            </>
           )}
         </div>
 
-        {/* Chat History - WORKING TRUNCATION + VISIBLE 3-DOTS */}
-        <div className="flex-1 flex flex-col min-h-0 relative">
-          <div className="p-6 pb-4 flex-shrink-0">
-            <div className="flex items-center gap-2">
-              <MessageSquare className="h-4 w-4 text-gray-600" />
-              <h3 className="text-sm font-semibold text-gray-800">Recent Sessions</h3>
-              <Badge variant="secondary" className="text-xs">{chats.length}</Badge>
-            </div>
+        {/* Collapsed Navigation */}
+        {isCollapsed ? (
+          <div className="flex-1 flex flex-col items-center p-3 space-y-4">
+            {/* Upload Icon */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => !isCollapsed && null}
+              className="w-10 h-10 p-0 rounded-lg hover:bg-gray-100"
+              title="Upload Data"
+            >
+              <Upload className="h-5 w-5 text-gray-600" />
+            </Button>
+
+            {/* Dataset Status */}
+            {datasetLoaded ? (
+              <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                <CheckCircle className="h-5 w-5 text-green-600" />
+              </div>
+            ) : (
+              <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
+                <Database className="h-5 w-5 text-gray-400" />
+              </div>
+            )}
+
+            {/* Current Chat Icon */}
+            {currentChat && (
+              <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
+                <MessageSquare className="h-5 w-5 text-purple-600" />
+              </div>
+            )}
+
+            {/* Recent Sessions */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setRecentChatsModalOpen(true)}
+              className="w-10 h-10 p-0 rounded-lg hover:bg-gray-100 relative"
+              title="Recent Sessions"
+            >
+              <History className="h-5 w-5 text-gray-600" />
+              {chats.length > 0 && (
+                <Badge 
+                  variant="secondary" 
+                  className="absolute -top-1 -right-1 h-5 w-5 p-0 text-xs bg-purple-100 text-purple-800 flex items-center justify-center"
+                >
+                  {chats.length > 9 ? '9+' : chats.length}
+                </Badge>
+              )}
+            </Button>
           </div>
-          
-          {/* Scrollable Chat List */}
-          <div className="flex-1 min-h-0 px-6 relative">
-            <ScrollArea className="h-full">
-              <div className="space-y-2 pb-6">
-                {chats.length === 0 ? (
-                  <div className="text-center py-8">
-                    <MessageSquare className="h-8 w-8 mx-auto text-gray-300 mb-2" />
-                    <div className="text-sm text-gray-500">No sessions yet</div>
-                    <div className="text-xs text-gray-400">Create a new session to start</div>
+        ) : (
+          // Full Content
+          <>
+            {/* Upload Section */}
+            <div className="p-6 border-b border-border">
+              <div className="flex items-center gap-2 mb-4">
+                <Upload className="h-4 w-4 text-gray-600" />
+                <h3 className="text-sm font-semibold text-gray-800">Data Upload</h3>
+                {!currentChatId && (
+                  <Badge variant="secondary" className="text-xs bg-orange-100 text-orange-700">
+                    Select chat first
+                  </Badge>
+                )}
+              </div>
+              
+              <div
+                {...getRootProps()}
+                className={cn(
+                  "border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all",
+                  "hover:border-primary hover:bg-primary/5",
+                  isDragActive && !isDragReject && "border-primary bg-primary/5",
+                  isDragReject && "border-red-300 bg-red-50",
+                  (isUploading || !currentChatId) && "opacity-60 cursor-not-allowed",
+                  uploadError && "border-red-300 bg-red-50"
+                )}
+              >
+                <input 
+                  {...getInputProps()} 
+                  onChange={handleFileInputChange}
+                  disabled={isUploading || !currentChatId}
+                />
+                
+                <div className="relative z-10">
+                  {!currentChatId ? (
+                    <div className="space-y-2">
+                      <MessageSquare className="h-8 w-8 mx-auto text-gray-400" />
+                      <div className="text-sm font-medium text-gray-700">Create or select a chat first</div>
+                      <div className="text-xs text-gray-500">Then upload your data file</div>
+                    </div>
+                  ) : isUploading ? (
+                    <div className="space-y-3">
+                      <Database className="h-8 w-8 mx-auto text-purple-600 animate-pulse" />
+                      <div className="text-sm font-medium text-gray-700">Processing your file...</div>
+                      <Progress value={progress} className="h-2" />
+                      <div className="text-xs text-gray-500">{progress}% complete</div>
+                    </div>
+                  ) : uploadError ? (
+                    <div className="space-y-2">
+                      <AlertCircle className="h-8 w-8 mx-auto text-red-500" />
+                      <div className="text-sm font-medium text-red-700">Upload failed</div>
+                      <div className="text-xs text-red-500">{uploadError}</div>
+                    </div>
+                  ) : datasetLoaded ? (
+                    <div className="space-y-2">
+                      <CheckCircle className="h-8 w-8 mx-auto text-green-500" />
+                      <div className="text-sm font-medium text-green-700">Dataset ready for this chat</div>
+                      <div className="text-xs text-green-600">Click to upload new data</div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Upload className="h-8 w-8 mx-auto text-gray-400" />
+                      <div className="text-sm font-medium text-gray-700">
+                        {isDragActive ? 'Drop your file here' : 'Drop files or click to browse'}
+                      </div>
+                      <div className="text-xs text-gray-500">CSV, Excel files up to 10GB</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Dataset Stats */}
+              {datasetLoaded && datasetInfo && (
+                <Card className="mt-4 border-0 shadow-sm" style={{ background: 'linear-gradient(135deg, #f5e7ff 0%, #e8d5ff 100%)' }}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <PieChart className="h-4 w-4 text-purple-600" />
+                      <span className="text-sm font-semibold text-gray-800">Dataset Overview</span>
+                      <Badge variant="secondary" className="text-xs bg-green-100 text-green-800 ml-auto">
+                        Active
+                      </Badge>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 gap-3">
+                      {getDatasetStats().map((stat, index) => (
+                        <div key={index} className="flex items-center justify-between p-2 bg-white/70 rounded-lg backdrop-blur-sm">
+                          <div className="flex items-center gap-2">
+                            <stat.icon className="h-3 w-3 text-purple-600" />
+                            <span className="text-xs text-gray-600">{stat.label}</span>
+                          </div>
+                          <Badge variant="secondary" className="text-xs font-medium bg-white/80">
+                            {stat.value}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                    
+                    <div className="mt-3 p-2 bg-green-100 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <Activity className="h-3 w-3 text-green-600" />
+                        <span className="text-xs font-medium text-green-800">Ready for Analysis</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            {/* Current Chat Section */}
+            <div className="flex-1 flex flex-col min-h-0 relative">
+              {/* Header with Recent Sessions Button */}
+              <div className="p-6 pb-4 flex-shrink-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4 text-gray-600" />
+                    <h3 className="text-sm font-semibold text-gray-800">Current Session</h3>
                   </div>
-                ) : (
-                  chats.map((chat) => {
-                    const lastMessage = chat.messages && chat.messages.length > 0 
-                      ? chat.messages[chat.messages.length - 1] 
-                      : null
-                    const preview = lastMessage 
-                      ? (lastMessage.type === 'user' ? lastMessage.content : 'AI Analysis')
-                      : 'New Session'
-                    
-                    // MANUAL TRUNCATION - GUARANTEED TO WORK
-                    const truncatedTitle = truncateText(chat.title, 25)
-                    const truncatedPreview = truncateText(preview, 35)
-                    
-                    return (
-                      <div
-                        key={chat.id}
-                        className={cn(
-                          "relative rounded-lg border transition-all",
-                          "hover:shadow-md hover:bg-gray-50",
-                          chat.id === currentChatId 
-                            ? "bg-purple-50 border-purple-200 shadow-sm" 
-                            : "bg-white border-gray-100 hover:border-gray-200"
-                        )}
+                  
+                  {/* Recent Sessions Button */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setRecentChatsModalOpen(true)}
+                    className="flex items-center gap-2 text-xs hover:bg-gray-100 px-3 py-2 h-auto"
+                    title="View all recent sessions"
+                  >
+                    <History className="h-4 w-4" />
+                    <span className="font-medium">Recent Sessions</span>
+                    <Badge variant="secondary" className="text-xs ml-1">
+                      {chats.length}
+                    </Badge>
+                  </Button>
+                </div>
+              </div>
+              
+              {/* Current Chat Display */}
+              <div className="flex-1 min-h-0 px-6 relative">
+                <div className="pb-6">
+                  {!currentChat ? (
+                    <div className="text-center py-8">
+                      <MessageSquare className="h-8 w-8 mx-auto text-gray-300 mb-2" />
+                      <div className="text-sm text-gray-500">No active session</div>
+                      <div className="text-xs text-gray-400 mb-4">Create a new session to start</div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRecentChatsModalOpen(true)}
+                        className="text-sm"
                       >
-                        {/* GRID LAYOUT - FIXED PROPORTIONS */}
-                        <div className="p-3">
+                        <History className="h-4 w-4 mr-2" />
+                        Browse Sessions
+                      </Button>
+                    </div>
+                  ) : (
+                    <div
+                      className={cn(
+                        "relative rounded-lg border transition-all",
+                        "bg-purple-50 border-purple-200 shadow-sm"
+                      )}
+                    >
+                      <div className="p-4">
+                        <div 
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 32px',
+                            gap: '8px',
+                            alignItems: 'start'
+                          }}
+                        >
+                          {/* Chat Content */}
                           <div 
-                            style={{
-                              display: 'grid',
-                              gridTemplateColumns: '1fr 32px', // Content takes remaining space, 32px for button
-                              gap: '8px',
-                              alignItems: 'start'
-                            }}
+                            className="overflow-hidden"
+                            style={{ minWidth: 0 }}
                           >
-                            {/* LEFT COLUMN: Chat Content */}
-                            <div 
-                              className="cursor-pointer overflow-hidden"
-                              onClick={() => switchToChat(chat.id)}
-                              style={{ minWidth: 0 }} // Critical for truncation
-                            >
-                              {/* Title with indicator */}
-                              <div className="flex items-center gap-2 mb-2">
-                                <div className={cn(
-                                  "w-2 h-2 rounded-full flex-shrink-0",
-                                  chat.id === currentChatId ? "bg-purple-500" : "bg-gray-300"
-                                )} />
-                                <div 
-                                  className="font-medium text-sm text-gray-900"
-                                  style={{
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap'
-                                  }}
-                                  title={chat.title} // Show full title on hover
-                                >
-                                  {truncatedTitle}
-                                </div>
-                              </div>
-                              
-                              {/* Preview text */}
-                              <div 
-                                className="text-xs text-gray-500 mb-2"
-                                style={{
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap'
-                                }}
-                                title={preview} // Show full preview on hover
-                              >
-                                {truncatedPreview}
-                              </div>
-                              
-                              {/* Bottom metadata */}
-                              <div className="flex items-center justify-between text-xs text-gray-400">
-                                <div 
-                                  className="flex items-center gap-1"
-                                  style={{ minWidth: 0 }}
-                                >
-                                  <Clock className="h-3 w-3 flex-shrink-0" />
-                                  <span 
-                                    style={{
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      whiteSpace: 'nowrap'
-                                    }}
-                                  >
-                                    {formatTime(chat.updated_at)}
-                                  </span>
-                                </div>
-                                {chat.messages && chat.messages.length > 0 && (
-                                  <div className="flex items-center gap-1 flex-shrink-0">
-                                    <MessageSquare className="h-3 w-3" />
-                                    <span>{chat.messages.length}</span>
-                                  </div>
-                                )}
+                            {/* Title with indicator */}
+                            <div className="flex items-center gap-2 mb-3">
+                              <div className="w-3 h-3 bg-purple-500 rounded-full flex-shrink-0 animate-pulse" />
+                              <div className="font-medium text-sm text-gray-900">
+                                Active Session
                               </div>
                             </div>
+
+                            {/* Chat Title */}
+                            <div 
+                              className="font-semibold text-base text-gray-900 mb-2"
+                              style={{
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                              }}
+                              title={currentChat.title}
+                            >
+                              {currentChat.title}
+                            </div>
                             
-                            {/* RIGHT COLUMN: 3-Dots Button */}
-                            <div className="relative flex justify-center">
-                              <button
-                                onClick={(e) => toggleDropdown(chat.id, e)}
-                                className={cn(
-                                  "w-8 h-8 rounded-md flex items-center justify-center",
-                                  "text-gray-500 hover:text-gray-700 hover:bg-gray-200",
-                                  "transition-colors duration-200",
-                                  openDropdownId === chat.id && "bg-gray-200 text-gray-700"
-                                )}
-                                title="More options"
-                              >
-                                <MoreVertical className="h-4 w-4" />
-                              </button>
-                              
-                              {/* DROPDOWN MENU */}
-                              {openDropdownId === chat.id && (
-                                <div 
-                                  className="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-2 min-w-[140px]"
-                                  onClick={(e) => e.stopPropagation()}
-                                  style={{
-                                    zIndex: 9999,
-                                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)'
-                                  }}
-                                >
-                                  {/* Rename Option */}
-                                  <button
-                                    onClick={(e) => handleRenameClick(chat, e)}
-                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-3 transition-colors"
-                                  >
-                                    <Edit2 className="h-4 w-4 text-blue-500" />
-                                    <span>Rename</span>
-                                  </button>
-                                  
-                                  {/* Delete Option */}
-                                  <button
-                                    onClick={(e) => handleDeleteClick(chat, e)}
-                                    className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
-                                  >
-                                    <Trash2 className="h-4 w-4 text-red-500" />
-                                    <span>Delete</span>
-                                  </button>
+                            {/* Preview text */}
+                            <div className="text-sm text-gray-600 mb-3">
+                              {(() => {
+                                const lastMessage = currentChat.messages && currentChat.messages.length > 0 
+                                  ? currentChat.messages[currentChat.messages.length - 1] 
+                                  : null
+                                const preview = lastMessage 
+                                  ? (lastMessage.type === 'user' ? lastMessage.content : 'AI Analysis')
+                                  : 'New Session'
+                                return truncateText(preview, 80)
+                              })()}
+                            </div>
+                            
+                            {/* Metadata */}
+                            <div className="flex items-center justify-between text-xs text-gray-500">
+                              <div className="flex items-center gap-1">
+                                <Clock className="h-3 w-3 flex-shrink-0" />
+                                <span>Updated {formatTime(currentChat.updated_at)}</span>
+                              </div>
+                              {currentChat.messages && currentChat.messages.length > 0 && (
+                                <div className="flex items-center gap-1">
+                                  <MessageSquare className="h-3 w-3" />
+                                  <span>{currentChat.messages.length} messages</span>
                                 </div>
                               )}
                             </div>
                           </div>
+                          
+                          {/* Actions Button */}
+                          <div className="relative flex justify-center">
+                            <button
+                              onClick={toggleDropdown}
+                              className={cn(
+                                "w-8 h-8 rounded-md flex items-center justify-center",
+                                "text-gray-500 hover:text-gray-700 hover:bg-gray-200",
+                                "transition-colors duration-200",
+                                openDropdownId === currentChatId && "bg-gray-200 text-gray-700"
+                              )}
+                              title="Session options"
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </button>
+                            
+                            {/* Dropdown Menu */}
+                            {openDropdownId === currentChatId && (
+                              <div 
+                                className="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-2 min-w-[140px]"
+                                onClick={(e) => e.stopPropagation()}
+                                style={{
+                                  zIndex: 9999,
+                                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)'
+                                }}
+                              >
+                                {/* Rename Option */}
+                                <button
+                                  onClick={handleRenameClick}
+                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center gap-3 transition-colors"
+                                >
+                                  <Edit2 className="h-4 w-4 text-blue-500" />
+                                  <span>Rename</span>
+                                </button>
+                                
+                                {/* Delete Option */}
+                                <button
+                                  onClick={handleDeleteClick}
+                                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                                >
+                                  <Trash2 className="h-4 w-4 text-red-500" />
+                                  <span>Delete</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    )
-                  })
-                )}
+                    </div>
+                  )}
+
+                  {/* Quick Access to Recent Sessions */}
+                  {chats.length > 0 && (
+                    <div className="mt-4">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRecentChatsModalOpen(true)}
+                        className="w-full text-sm justify-center"
+                      >
+                        <History className="h-4 w-4 mr-2" />
+                        View All {chats.length} Sessions
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </div>
-            </ScrollArea>
-          </div>
-        </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Delete Dialog */}
@@ -517,6 +663,17 @@ export default function Sidebar() {
         }}
         onConfirm={handleRenameConfirm}
         currentTitle={chatToRename?.title || ''}
+      />
+
+      {/* Recent Chats Modal */}
+      <RecentChatsModal
+        open={recentChatsModalOpen}
+        onOpenChange={setRecentChatsModalOpen}
+        chats={chats}
+        currentChatId={currentChatId}
+        onSelectChat={switchToChat}
+        onDeleteChat={handleDeleteFromModal}
+        onRenameChat={handleRenameFromModal}
       />
     </>
   )

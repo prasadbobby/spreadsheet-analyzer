@@ -41,7 +41,8 @@ import {
   Activity
 } from "lucide-react";
 import { useAISheetChat } from "@/contexts/AISheetChatContext";
-import { formatMessageText, getCurrentTime } from "@/lib/utils";
+import { useSidebarContext } from '@/contexts/SidebarContext';
+import { formatMessageText, getCurrentTime, cn } from "@/lib/utils";
 import WelcomeScreen from "@/components/WelcomeScreen";
 import OptimizedDataTable from "./OptimizedDataTable";
 import ChartVisualization from "@/components/ChartVisualization";
@@ -60,10 +61,12 @@ export default function MainContent() {
     isProcessing,
     messages,
     sendMessage,
-    sendSimilarityQuery, // Add this new function
+    sendSimilarityQuery,
     clearChat,
     datasetInfo,
   } = useAISheetChat();
+
+  const { isCollapsed, isMobile } = useSidebarContext();
 
   const [inputMessage, setInputMessage] = useState("");
   const messagesEndRef = useRef(null);
@@ -75,8 +78,7 @@ export default function MainContent() {
   const [debouncedInputMessage, setDebouncedInputMessage] = useState("");
   const debounceTimeoutRef = useRef(null);
 
-
- // Enhanced similarity detection
+  // Enhanced similarity detection
   const detectSimilarityQuery = useCallback((question) => {
     const similarityKeywords = [
       'similar', 'like', 'resembling', 'comparable', 'related to',
@@ -101,8 +103,6 @@ export default function MainContent() {
     }
   }, []);
 
-
-
   // Throttled scroll effect
   useEffect(() => {
     const timeoutId = setTimeout(scrollToBottom, 100);
@@ -126,7 +126,7 @@ export default function MainContent() {
     };
   }, [inputMessage]);
 
-// Enhanced send handler with similarity detection
+  // Enhanced send handler with similarity detection
   const handleSend = useCallback(async () => {
     if (
       inputMessage.trim() &&
@@ -154,7 +154,7 @@ export default function MainContent() {
     }
   }, [inputMessage, isProcessing, datasetLoaded, currentChatId, sendMessage, sendSimilarityQuery, detectSimilarityQuery]);
 
-   const handleKeyDown = useCallback(
+  const handleKeyDown = useCallback(
     (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -173,7 +173,7 @@ export default function MainContent() {
     }
   }, []);
 
-   // Throttled input change handler
+  // Throttled input change handler
   const handleInputChange = useCallback(
     (e) => {
       setInputMessage(e.target.value);
@@ -200,7 +200,7 @@ export default function MainContent() {
     clearChat();
   }, [clearChat]);
 
-// Export handler
+  // Export handler
   const handleExport = useCallback(async (exportType) => {
     try {
       if (exportType === 'pdf') {
@@ -216,79 +216,78 @@ export default function MainContent() {
     }
   }, []);
 
-
-// Enhanced quick actions based on dataset type
-const quickActions = useMemo(() => {
-  const datasetType = datasetInfo?.dataset_type || datasetInfo?.context?.type || 'general';
-  
-  if (datasetType === 'jira') {
-    return [
-      {
-        icon: Search,
-        label: "Similar Bugs",
-        message: "Find stories similar to buffer overflow security issues",
-        color: "bg-red-50 text-red-700 border-red-200 hover:bg-red-100",
-      },
-      {
-        icon: TrendingUp,
-        label: "Trends",
-        message: "Analyze ticket trends over the last quarter",
-        color: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
-      },
-      {
-        icon: AlertTriangle,
-        label: "Critical",
-        message: "Show all critical and high priority tickets",
-        color: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
-      },
-      {
-        icon: Users,
-        label: "Assignees",
-        message: "Group tickets by assignee and workload",
-        color: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100",
-      },
-      {
-        icon: GitMerge,
-        label: "Similar Issues",
-        message: "Find tickets similar to string security vulnerabilities",
-        color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
-      },
-    ];
-  } else {
-    return [
-      {
-        icon: Eye,
-        label: "View All",
-        message: "Show me all the data",
-        color: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
-      },
-      {
-        icon: TrendingUp,
-        label: "Trends",
-        message: "Analyze patterns and trends",
-        color: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100",
-      },
-      {
-        icon: BarChart3,
-        label: "Chart",
-        message: "Visualize with charts",
-        color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
-      },
-      {
-        icon: GitMerge,
-        label: "Similar",
-        message: "Find similar or duplicate records",
-        color: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
-      },
-      {
-        icon: Lightbulb,
-        label: "Summary",
-        message: "Get comprehensive insights",
-        color: "bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100",
-      },
-    ];
-  }
-}, [datasetInfo]);
+  // Enhanced quick actions based on dataset type
+  const quickActions = useMemo(() => {
+    const datasetType = datasetInfo?.dataset_type || datasetInfo?.context?.type || 'general';
+    
+    if (datasetType === 'jira') {
+      return [
+        {
+          icon: Search,
+          label: "Similar Bugs",
+          message: "Find stories similar to buffer overflow security issues",
+          color: "bg-red-50 text-red-700 border-red-200 hover:bg-red-100",
+        },
+        {
+          icon: TrendingUp,
+          label: "Trends",
+          message: "Analyze ticket trends over the last quarter",
+          color: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
+        },
+        {
+          icon: AlertTriangle,
+          label: "Critical",
+          message: "Show all critical and high priority tickets",
+          color: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
+        },
+        {
+          icon: Users,
+          label: "Assignees",
+          message: "Group tickets by assignee and workload",
+          color: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100",
+        },
+        {
+          icon: GitMerge,
+          label: "Similar Issues",
+          message: "Find tickets similar to string security vulnerabilities",
+          color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
+        },
+      ];
+    } else {
+      return [
+        {
+          icon: Eye,
+          label: "View All",
+          message: "Show me all the data",
+          color: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",
+        },
+        {
+          icon: TrendingUp,
+          label: "Trends",
+          message: "Analyze patterns and trends",
+          color: "bg-green-50 text-green-700 border-green-200 hover:bg-green-100",
+        },
+        {
+          icon: BarChart3,
+          label: "Chart",
+          message: "Visualize with charts",
+          color: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",
+        },
+        {
+          icon: GitMerge,
+          label: "Similar",
+          message: "Find similar or duplicate records",
+          color: "bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100",
+        },
+        {
+          icon: Lightbulb,
+          label: "Summary",
+          message: "Get comprehensive insights",
+          color: "bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100",
+        },
+      ];
+    }
+  }, [datasetInfo]);
 
   // Memoized helper functions
   const getAnalysisIcon = useCallback((analysisType) => {
@@ -357,19 +356,20 @@ const quickActions = useMemo(() => {
     return colors[analysisType] || "bg-gray-100 text-gray-800";
   }, []);
 
-const copyToClipboard = useCallback((text) => {
-  navigator.clipboard.writeText(text).then(() => {
-    toast.success('Copied to clipboard!', {
-      duration: 2000,
-      position: 'bottom-right'
+  const copyToClipboard = useCallback((text) => {
+    navigator.clipboard.writeText(text).then(() => {
+      toast.success('Copied to clipboard!', {
+        duration: 2000,
+        position: 'bottom-right'
+      });
+    }).catch(() => {
+      toast.error('Failed to copy to clipboard', {
+        duration: 2000,
+        position: 'bottom-right'
+      });
     });
-  }).catch(() => {
-    toast.error('Failed to copy to clipboard', {
-      duration: 2000,
-      position: 'bottom-right'
-    });
-  });
-}, []);
+  }, []);
+
   // Get dataset type display name
   const getDatasetTypeDisplay = useCallback(() => {
     const datasetType = datasetInfo?.dataset_type || datasetInfo?.context?.type || 'general';
@@ -403,9 +403,7 @@ const copyToClipboard = useCallback((text) => {
     copyToClipboard,
   ]);
 
-
-
-    // Show welcome screen if no current chat
+  // Show welcome screen if no current chat
   if (!currentChatId) {
     return (
       <div className="flex-1 flex flex-col bg-gray-50 min-h-0">
@@ -550,38 +548,37 @@ const copyToClipboard = useCallback((text) => {
         <div className="border-t border-gray-200 bg-white shadow-lg flex-shrink-0">
           <div className="p-6">
             <div className="max-w-4xl mx-auto space-y-4">
-             {/* Enhanced Quick Actions - Compact Version */}
-{/* Super Compact Quick Actions */}
-{datasetLoaded && messages.length <= 2 && (
-  <div className="mb-4">
-    <div className="flex items-center gap-2 mb-2">
-      <Zap className="h-3 w-3 text-purple-600" />
-      <span className="text-xs font-medium text-gray-700">
-        Quick Actions
-      </span>
-    </div>
-    <div className="flex flex-wrap gap-1">
-      {quickActions.map((action, index) => (
-        <Button
-          key={index}
-          variant="outline"
-          size="sm"
-          onClick={() => setQuickMessage(action.message)}
-          disabled={
-            !datasetLoaded || isProcessing || !currentChatId
-          }
-          className={`text-xs h-8 px-3 flex items-center gap-1 hover:shadow-sm transition-all ${action.color}`}
-          title={action.message}
-        >
-          <action.icon className="h-3 w-3" />
-          <span className="font-medium">{action.label}</span>
-        </Button>
-      ))}
-    </div>
-  </div>
-)}
+              {/* Quick Actions */}
+              {datasetLoaded && messages.length <= 2 && (
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Zap className="h-3 w-3 text-purple-600" />
+                    <span className="text-xs font-medium text-gray-700">
+                      Quick Actions
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {quickActions.map((action, index) => (
+                      <Button
+                        key={index}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setQuickMessage(action.message)}
+                        disabled={
+                          !datasetLoaded || isProcessing || !currentChatId
+                        }
+                        className={`text-xs h-8 px-3 flex items-center gap-1 hover:shadow-sm transition-all ${action.color}`}
+                        title={action.message}
+                      >
+                        <action.icon className="h-3 w-3" />
+                        <span className="font-medium">{action.label}</span>
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-              {/* Optimized Input Field */}
+              {/* Input Field */}
               <div className="flex gap-4 items-end">
                 <div className="flex-1">
                   <Textarea
@@ -621,7 +618,7 @@ const copyToClipboard = useCallback((text) => {
                 </Button>
               </div>
 
-              {/* Enhanced Helper Text */}
+              {/* Helper Text */}
               {datasetLoaded && currentChatId && (
                 <div className="text-center">
                   <p className="text-xs text-gray-500">
@@ -657,13 +654,14 @@ const copyToClipboard = useCallback((text) => {
         </div>
       </div>
 
-     {/* Dialogs */}
+      {/* Clear Session Dialog */}
       <ClearSessionDialog
         open={clearDialogOpen}
         onOpenChange={setClearDialogOpen}
         onConfirm={handleClearSession}
       />
 
+      {/* Export Session Dialog */}
       <ExportSessionDialog
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
@@ -739,11 +737,6 @@ const MessageBubble = React.memo(
                           </div>
                         );
                       })()}
-                    </Badge>
-                  )}
-                  {message.type === "assistant" && message.dataset_type && (
-                    <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-800">
-                      {message.dataset_type.toUpperCase()}
                     </Badge>
                   )}
                 </div>
